@@ -3,7 +3,7 @@
 import * as THREE from 'three';
 import { CLOTHING_BY_ID } from '../../shared/catalog.js';
 import type { Look } from '../../shared/types.js';
-import { mat } from '../engine/build.js';
+import { mat, roundedBox } from '../engine/build.js';
 import { fabric } from '../engine/textures.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
@@ -114,9 +114,9 @@ export class Humanoid {
       const sk = new THREE.CylinderGeometry(0.15 * W, 0.26 * W, 0.34, 18, 1, true);
       const m = this.add(this.hips, sk, mat('skirt_' + (L.colors.bottom ?? ''), { color: L.colors.bottom ?? '#333', roughness: 0.85, side: THREE.DoubleSide }), 0, -0.12, 0, 1, 1, 0.8);
       m.castShadow = true;
-      this.add(this.hips, sphere(0.16), bot, 0, 0.02, 0, W * (f ? 1.12 : 1.05), 0.7, 0.75);
+      this.add(this.hips, sphere(0.15), bot, 0, 0.03, 0, W * (f ? 1.1 : 1.0), 0.6, 0.72);
     } else {
-      this.add(this.hips, sphere(0.16), bot, 0, 0.02, 0, W * (f ? 1.12 : 1.05), 0.75, 0.75);
+      this.add(this.hips, sphere(0.15), bot, 0, 0.03, 0, W * (f ? 1.1 : 1.0), 0.6, 0.72);
     }
 
     // spine / torso
@@ -125,8 +125,8 @@ export class Humanoid {
     this.spine.add(this.chest);
     this.chest.position.set(0, 0.16, 0);
     const torsoW = (f ? 0.92 : 1.08) * W;
-    this.add(this.spine, capsule(0.14, 0.14), top, 0, 0.06, 0, torsoW * 0.95, 1, 0.72); // abdomen
-    this.add(this.chest, capsule(0.16, 0.16), top, 0, 0.1, 0, torsoW, 1, 0.74); // chest
+    this.add(this.spine, capsule(0.13, 0.14), top, 0, 0.07, 0, torsoW * (f ? 0.86 : 0.92), 1, 0.7); // waist
+    this.add(this.chest, capsule(0.155, 0.17), top, 0, 0.1, 0, torsoW * (f ? 0.98 : 1.08), 1, 0.7); // chest
     if (f) {
       this.add(this.chest, sphere(0.07), top, 0.065, 0.1, 0.075, 1, 0.85, 0.8);
       this.add(this.chest, sphere(0.07), top, -0.065, 0.1, 0.075, 1, 0.85, 0.8);
@@ -249,8 +249,8 @@ export class Humanoid {
       kn.add(ft);
       const st = shoeDef?.style ?? 'sneaker';
       const sh = st === 'boot' || st === 'hightop' ? 0.12 : st === 'loafer' ? 0.06 : 0.08;
-      this.add(ft, new THREE.BoxGeometry(0.1, sh, 0.24), shoe, 0, -0.02 - (0.08 - sh) / 2, 0.045);
-      this.add(ft, sphere(0.05, 10), shoe, 0, -0.025, 0.15, 1, 0.7, 0.8);
+      this.add(ft, roundedBox(0.095, sh, 0.24, 0.035), shoe, 0, -0.02 - (0.08 - sh) / 2, 0.045);
+      this.add(ft, sphere(0.048, 12), shoe, 0, -0.03, 0.14, 1, 0.65, 0.9);
       this.add(ft, new THREE.BoxGeometry(0.105, 0.025, 0.26), st === 'loafer' || st === 'boot' ? mat('sole_dark', { color: '#2a2018', roughness: 0.9 }) : sole, 0, -0.065, 0.05);
     }
     // feet height correction: total leg = 0.04+0.44+0.42+0.075 ≈ hip height

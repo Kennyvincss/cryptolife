@@ -490,13 +490,13 @@ function loop(now: number) {
     }
   }
   const near = player.mode === 'walk' ? remotes.nearest(player.pos, zone, 2.6) : null;
-  if (near) { extra.push(`G @${near.entry.name} — profile`); gAction = () => hud.togglePhone(true, 'social', { user: near.entry.name }); }
+  if (near && !opts.some((o) => o.key === 'G')) { extra.push(`G @${near.entry.name} — profile`); gAction = () => hud.togglePhone(true, 'social', { user: near.entry.name }); }
   if (player.mode === 'seated' || player.mode === 'lying') extra.push('W Stand up');
   hud.setPrompts(opts, extra);
   if (!uiBlocked) {
     for (const o of opts) if (input.pressed('Key' + o.key)) { o.action(); audio.sfx('click'); break; }
     if (fAction && input.pressed('KeyF')) fAction();
-    if (gAction && input.pressed('KeyG')) gAction();
+    if (gAction && input.pressed('KeyG') && !opts.some((o) => o.key === 'G')) gAction();
   }
 
   // player & world

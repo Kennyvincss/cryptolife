@@ -88,6 +88,9 @@ class Kit {
     if (!seatH) this.colliders.addBox(INTERIOR_ORIGIN.x + x, INTERIOR_ORIGIN.z + z, 0.6, 0.6, 'npc', 2);
     const speed = anim === 'walk' ? 1.2 : 0;
     this.updaters.push((dt) => h.update(dt, anim, speed));
+    const lines = npcLines(name);
+    let i = Math.floor(Math.random() * lines.length);
+    this.act(x, z, `Talk to ${name.replace(' (NPC)', '')}`, () => { api.toast(`${name.replace(' (NPC)', '')}: “${lines[i++ % lines.length]}”`); api.emote('talk', 3); }, seatH ? 1.3 : 1.6, 'G');
     return h;
   }
   light(x: number, y: number, z: number, color = 0xffe2c0, intensity = 30, distance = 14) {
@@ -195,6 +198,18 @@ class Kit {
       },
     };
   }
+}
+
+function npcLines(name: string): string[] {
+  const n = name.toLowerCase();
+  const trending = () => store.trending[0] ?? 'crypto-city';
+  if (/barista|cashier|cook|bartender|host|maître|waiter|sommelier/.test(n)) return ['What can I get you?', 'Card or wallet? Kidding — it’s all simulated here.', `Everyone keeps talking about #${trending()} today.`, 'We’re hiring — check the Jobs app if you want shifts.'];
+  if (/trader|head trader/.test(n)) return ['Never risk what you can’t afford to lose — even in a sim.', 'Set a stop-loss. Your future self will thank you.', 'Consistency beats one lucky trade on the leaderboard.', `Watching #${trending()} closely.`];
+  if (/dj/.test(n)) return ['Every track tonight is an original Crypto City FM cut.', 'Hit the floor — press 2 to dance!'];
+  if (/recruit|ops|agent|sales|dealer|stylist|advisor|curator|concierge|desk|mechanic/.test(n)) return ['Happy to help — use the terminal or counter next to me.', 'Prices are in simulated dollars, no real money involved.', 'Come back any time.'];
+  if (/partner|associate/.test(n)) return ['Show us traction: users, milestones, a clear narrative.', 'Market sentiment matters — VC waves make closing easier.'];
+  if (/speaker|anchor/.test(n)) return [`Today’s theme: what #${trending()} means for builders.`, 'Questions? Use the venue chat — press T then Tab.'];
+  return ['gm!', `Have you seen the news about #${trending()}?`, 'I heard the Airdrop Center has new campaigns.', 'Liquidity Nightclub is wild after midnight.', 'I’m saving up for a place in Summit Tower.'];
 }
 
 // ---------------------------------------------------------------------------

@@ -8,6 +8,7 @@ let seq = 1;
 const pending = new Map<number, { res: (d: any) => void; rej: (e: Error) => void }>();
 let token = '';
 let reconnectTimer = 0;
+let lastMeKey = '';
 
 export async function auth(kind: 'login' | 'register', username: string, password: string) {
   const r = await fetch('/api/' + kind, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username, password }) });
@@ -54,7 +55,13 @@ function handle(m: any, onInit: () => void) {
       emit('prices', store.prices);
       onInit();
       break;
-    case 'me': store.me = m.me; emit('me', m.me); break;
+    case 'me': {
+      // periodic pushes often only change net worth (prices moved): don't re-render views for that
+      const key = JSON.stringify({ ...m.me, netWorth: 0 });
+      store.me = m.me;
+      if (key !== lastMeKey) { lastMeKey = key; emit('me', m.me); }
+      break;
+    }
     case 'res': {
       const p = pending.get(m.id);
       if (p) { pending.delete(m.id); m.ok ? p.res(m.d) : p.rej(new Error(m.e)); }

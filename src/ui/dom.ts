@@ -49,9 +49,14 @@ export function view(el: HTMLElement, render: (el: HTMLElement, rerender: () => 
   let alive = true;
   let last = 0;
   let timer = 0;
+  let pressing = false;
+  const down = () => { pressing = true; };
+  const up = () => { if (pressing) { pressing = false; if (pending) setTimeout(rerender, 30); } };
+  el.addEventListener('pointerdown', down);
+  window.addEventListener('pointerup', up);
   const rerender = () => {
     if (!alive) return;
-    if (el.contains(document.activeElement) && isTyping()) { pending = true; return; }
+    if (pressing || (el.contains(document.activeElement) && isTyping())) { pending = true; return; }
     const now = performance.now();
     if (now - last < 250) { clearTimeout(timer); timer = window.setTimeout(rerender, 260); return; }
     last = now;
@@ -67,7 +72,7 @@ export function view(el: HTMLElement, render: (el: HTMLElement, rerender: () => 
   const offs = deps.map((d) => on(d, rerender));
   const blur = () => { if (pending) setTimeout(rerender, 50); };
   el.addEventListener('focusout', blur);
-  return () => { alive = false; offs.forEach((o) => o()); el.removeEventListener('focusout', blur); };
+  return () => { alive = false; offs.forEach((o) => o()); el.removeEventListener('focusout', blur); el.removeEventListener('pointerdown', down); window.removeEventListener('pointerup', up); };
 }
 
 const dataCache = new Map<string, { at: number; data: any; loading: boolean; err?: string }>();
