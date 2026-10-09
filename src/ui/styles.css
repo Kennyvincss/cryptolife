@@ -279,3 +279,40 @@ pre.keys, .help pre { font-family: Consolas, monospace; font-size: 12px; white-s
   .grid { grid-template-columns: 1fr 1fr; }
   .hud-ride, .hud-wp { top: calc(70px + env(safe-area-inset-top)); font-size: 12px; max-width: 70vw; }
 }
+
+/* hidden overlays must never catch taps (the #hud > * rule above would otherwise re-enable them) */
+#hud > .panel:not(.open), #hud > .phone:not(.open) { pointer-events: none; }
+#hud > .tl, #hud > .tr, #hud > .bl, #hud > .br, #hud > .reacts, #hud > .hint, #hud > .hud-ride, #hud > .hud-wp { pointer-events: none; }
+#hud .chat, #hud #toasts, #hud .prompt, #hud .minimap { pointer-events: auto; }
+
+/* ---------- landscape play on phones ---------- */
+body.rotated { position: fixed; top: 0; left: 0; transform-origin: 0 0; transform: translateX(100vw) rotate(90deg); overflow: hidden; }
+body.land .hint { display: none; }
+body.land .tl { top: 6px; left: 8px; transform: scale(0.68); transform-origin: top left; }
+body.land .tr { top: 6px; right: 8px; transform: scale(0.68); transform-origin: top right; }
+body.land .bl { top: 72px; left: 8px; bottom: auto; gap: 4px; }
+body.land .hud-loc { font-size: 10px; padding: 2px 8px; }
+body.land .minimap { width: 96px; height: 96px; }
+body.land .chat { width: 34vw; }
+body.land .chat-log { max-height: 44px; font-size: 10px; }
+body.land .br { right: 12px; bottom: 96px; top: auto; }
+body.land .prompt { padding: 9px 13px; font-size: 13px; }
+body.land .hud-speed { padding: 4px 10px; } body.land .hud-speed b { font-size: 22px; }
+body.land .joy { left: 18px; bottom: 14px; width: 120px; height: 120px; }
+body.land .joy-knob { left: 35px; top: 35px; }
+body.land .tbar { top: 6px; bottom: auto; left: 50%; transform: translateX(-50%); flex-direction: row; }
+body.land .tbtn { width: 42px; height: 42px; font-size: 19px; }
+body.land .tpad { right: 14px; bottom: 14px; flex-direction: row; align-items: flex-end; }
+body.land .tbtn.big { width: 62px; height: 62px; }
+body.land .look-zone { width: 60%; height: 100%; }
+body.land .hud-ride, body.land .hud-wp { top: 52px; font-size: 11px; padding: 4px 12px; }
+body.land #toasts { max-width: 280px; }
+body.land .toast { font-size: 11px; padding: 6px 10px; }
+body.land .phone, body.land .phone.open { left: 0; right: 0; width: 100%; height: 100%; border-radius: 0; border: none; }
+body.land .phone { bottom: -110%; } body.land .phone.open { bottom: 0; }
+body.land .ph-notch { display: none; }
+body.land .ph-status { padding: 6px 18px 2px; }
+body.land .ph-grid { grid-template-columns: repeat(6, 1fr); gap: 10px 6px; }
+body.land .app .ic { width: 46px; height: 46px; font-size: 22px; }
+body.land .panel, body.land .panel.wide { width: 100%; height: 100%; max-height: 100%; border-radius: 0; }
+body.land .help { max-width: 90%; font-size: 12px; }

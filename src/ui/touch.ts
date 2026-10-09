@@ -4,6 +4,7 @@
 
 import type { Input } from '../engine/input.js';
 import { h } from './dom.js';
+import { toApp } from './orient.js';
 
 export function mountTouch(input: Input, actions: { phone: () => void; map: () => void; chat: () => void; blocked: () => boolean }) {
   document.body.classList.add('touch');
@@ -32,8 +33,10 @@ export function mountTouch(input: Input, actions: { phone: () => void; map: () =
     const t = e.changedTouches[0];
     jid = t.identifier;
     const r = joy.getBoundingClientRect();
-    cx = r.left + r.width / 2; cy = r.top + r.height / 2;
-    move(t.clientX, t.clientY);
+    const c = toApp(r.left + r.width / 2, r.top + r.height / 2);
+    cx = c.x; cy = c.y;
+    const p = toApp(t.clientX, t.clientY);
+    move(p.x, p.y);
   }, { passive: false });
   const move = (x: number, y: number) => {
     let dx = x - cx, dy = y - cy;
@@ -48,7 +51,7 @@ export function mountTouch(input: Input, actions: { phone: () => void; map: () =
     input.setVirtual('ShiftLeft', run || Math.hypot(nx, ny) > 0.95);
   };
   window.addEventListener('touchmove', (e) => {
-    for (const t of Array.from(e.changedTouches)) if (t.identifier === jid) move(t.clientX, t.clientY);
+    for (const t of Array.from(e.changedTouches)) if (t.identifier === jid) { const p = toApp(t.clientX, t.clientY); move(p.x, p.y); }
   }, { passive: true });
   const end = (e: TouchEvent) => { for (const t of Array.from(e.changedTouches)) if (t.identifier === jid) release(); };
   window.addEventListener('touchend', end);
@@ -59,13 +62,14 @@ export function mountTouch(input: Input, actions: { phone: () => void; map: () =
   look.addEventListener('touchstart', (e) => {
     e.preventDefault();
     const t = e.changedTouches[0];
-    lid = t.identifier; lx = t.clientX; ly = t.clientY;
+    lid = t.identifier; const p = toApp(t.clientX, t.clientY); lx = p.x; ly = p.y;
   }, { passive: false });
   look.addEventListener('touchmove', (e) => {
     e.preventDefault();
     for (const t of Array.from(e.changedTouches)) if (t.identifier === lid) {
-      input.addLook((t.clientX - lx) * 1.6, (t.clientY - ly) * 1.6);
-      lx = t.clientX; ly = t.clientY;
+      const p = toApp(t.clientX, t.clientY);
+      input.addLook((p.x - lx) * 1.6, (p.y - ly) * 1.6);
+      lx = p.x; ly = p.y;
     }
   }, { passive: false });
   look.addEventListener('touchend', () => (lid = null));

@@ -4,6 +4,8 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { setMaxAnisotropy } from './textures.js';
+import { view } from '../ui/orient.js';
+import { on } from '../state.js';
 
 export type Quality = 'low' | 'medium' | 'high';
 
@@ -33,6 +35,7 @@ export class Renderer {
     this.composer.addPass(new OutputPass());
     this.applyQuality();
     window.addEventListener('resize', () => this.resize());
+    on('viewresize', () => this.resize());
     this.resize();
   }
 
@@ -52,7 +55,7 @@ export class Renderer {
   }
 
   resize() {
-    const w = window.innerWidth, h = window.innerHeight;
+    const w = view.rotated ? view.w : window.innerWidth, h = view.rotated ? view.h : window.innerHeight;
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(w, h);

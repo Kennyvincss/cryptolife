@@ -8,6 +8,7 @@ import { audio } from './audio/audio.js';
 import { music, remoteMusic, venueMusic } from './audio/music.js';
 import { Input, isTouchDevice } from './engine/input.js';
 import { mountTouch } from './ui/touch.js';
+import { enableLandscape } from './ui/orient.js';
 import { Renderer } from './engine/renderer.js';
 import { Environment } from './engine/sky.js';
 import { Humanoid, randomLook, type Anim } from './entities/humanoid.js';
@@ -275,6 +276,9 @@ function start() {
   if (isTouchDevice()) {
     mountTouch(input, { phone: () => hud.togglePhone(), map: () => hud.toggleMap(), chat: () => hud.openChat(), blocked: () => hud.panelOpen || hud.mapOpen || hud.phoneOpen || hud.chatOpen });
     player.camDist = 6.5;
+    enableLandscape();
+    R.camera.far = 1300; R.camera.updateProjectionMatrix();
+    if (window.innerHeight > window.innerWidth) toast('Turn your phone sideways to play in landscape.', 'ok');
   }
   hud.mapMarks = () => ({
     player: { x: zone === 'street' ? player.pos.x : doorPos().x, z: zone === 'street' ? player.pos.z : doorPos().z, heading: player.heading },
@@ -296,6 +300,7 @@ function start() {
   on('notify', (n: any) => { if (n.kind === 'level') audio.sfx('level'); });
   window.addEventListener('mousedown', () => audio.init(), { once: true });
   window.addEventListener('keydown', () => audio.init(), { once: true });
+  window.addEventListener('touchend', () => audio.init(), { once: true });
 
   // start at home
   enterZone('home:' + me.id).catch(() => {});

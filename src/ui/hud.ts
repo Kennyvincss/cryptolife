@@ -13,6 +13,7 @@ import { run, toast } from './components.js';
 import { SIM, add, h, view } from './dom.js';
 import { drawFullMap, drawMinimap, type MapMarks } from './map.js';
 import { PANELS } from './panels.js';
+import { view as vp } from './orient.js';
 
 export class HUD {
   root: HTMLElement;
@@ -237,11 +238,12 @@ export class HUD {
   renderMap(init = false) {
     if (init || !this.mapCanvas) {
       this.mapEl.innerHTML = '';
-      this.mapCanvas = h('canvas', { width: Math.min(1100, innerWidth - 80), height: Math.min(820, innerHeight - 120) }) as HTMLCanvasElement;
+      this.mapCanvas = h('canvas', { width: Math.min(1100, vp.w - 40), height: Math.min(820, vp.h - 90) }) as HTMLCanvasElement;
       this.mapCanvas.addEventListener('click', (e) => {
         if (!this.toWorld) return;
-        const r = this.mapCanvas!.getBoundingClientRect();
-        const w = this.toWorld((e.clientX - r.left) * (this.mapCanvas!.width / r.width), (e.clientY - r.top) * (this.mapCanvas!.height / r.height));
+        // offsetX/Y are in the canvas's own (possibly rotated) coordinate space
+        const c = this.mapCanvas!;
+        const w = this.toWorld(e.offsetX * (c.width / c.clientWidth), e.offsetY * (c.height / c.clientHeight));
         this.onMapClick?.(w.x, w.z);
       });
       add(this.mapEl, h('div.mh', h('b', 'CRYPTO CITY'), h('span.muted', ' — click to set a GPS waypoint · M to close'), h('button.pn-x', { onclick: () => this.toggleMap(false) }, '✕')), this.mapCanvas,
