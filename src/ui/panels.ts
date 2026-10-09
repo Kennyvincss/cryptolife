@@ -7,6 +7,7 @@ import {
 import { FEATURE_BY_ZONE } from '../../shared/city.js';
 import type { Challenge, Look, ProjectRecord, Slot } from '../../shared/types.js';
 import { api } from '../api.js';
+import { audio } from '../audio/audio.js';
 import { act } from '../net/client.js';
 import { fmt, store } from '../state.js';
 import { APP_BY_ID, type AppCtx } from './apps.js';
@@ -328,8 +329,128 @@ const arcade: Panel = {
   },
 };
 
+
+// ------------------------------------------------------------- pool / snooker
+const pool: Panel = {
+  title: 'Pool table',
+  render(el) {
+    const W = 600, H = 330, R = 9, rail = 26;
+    const c = h('canvas', { width: W, height: H, style: { width: '100%', touchAction: 'none', borderRadius: '10px' } }) as HTMLCanvasElement;
+    const info = h('div.muted', 'Drag back from the white ball and release to shoot. Pot all the coloured balls.');
+    add(el, c, info, h('div.row', btn('Rack again', () => rack(), 'ghost')));
+    const x = c.getContext('2d')!;
+    type B = { x: number; y: number; vx: number; vy: number; c: string; n: number; in: boolean };
+    let balls: B[] = [];
+    let shots = 0, potted = 0;
+    const pockets = [[rail, rail], [W / 2, rail - 4], [W - rail, rail], [rail, H - rail], [W / 2, H - rail + 4], [W - rail, H - rail]];
+    const cols = ['#ffd23f', '#1e4fd9', '#d92b3a', '#6b4ea8', '#e46f2e', '#2f7d5b', '#8c2f39', '#111', '#ffd23f', '#1e4fd9'];
+    function rack() {
+      balls = [{ x: W * 0.25, y: H / 2, vx: 0, vy: 0, c: '#fff', n: 0, in: false }];
+      let n = 1;
+      for (let row = 0; row < 4; row++) for (let i = 0; i <= row; i++) balls.push({ x: W * 0.68 + row * R * 1.8, y: H / 2 + (i - row / 2) * R * 2.05, vx: 0, vy: 0, c: cols[(n - 1) % cols.length], n: n++, in: false });
+      shots = 0; potted = 0; info.textContent = 'Drag back from the white ball and release to shoot.';
+    }
+    rack();
+    const pos = (e: PointerEvent) => ({ x: e.offsetX * (W / c.clientWidth), y: e.offsetY * (H / c.clientHeight) });
+    let aim: { x: number; y: number } | null = null;
+    const moving = () => balls.some((b) => !b.in && Math.hypot(b.vx, b.vy) > 2);
+    c.addEventListener('pointerdown', (e) => { if (!moving()) { aim = pos(e); c.setPointerCapture(e.pointerId); } });
+    c.addEventListener('pointermove', (e) => { if (aim) aim = pos(e); });
+    c.addEventListener('pointerup', () => {
+      if (!aim) return;
+      const cue = balls[0];
+      const dx = cue.x - aim.x, dy = cue.y - aim.y;
+      const pw = Math.min(160, Math.hypot(dx, dy)) * 7;
+      const d = Math.hypot(dx, dy) || 1;
+      cue.vx = (dx / d) * pw; cue.vy = (dy / d) * pw;
+      aim = null; shots++;
+    });
+    let last = performance.now();
+    const step = (t: number) => {
+      if (!c.isConnected) return;
+      const dt = Math.min(0.03, (t - last) / 1000); last = t;
+      for (let sub = 0; sub < 4; sub++) {
+        const h2 = dt / 4;
+        for (const b of balls) {
+          if (b.in) continue;
+          b.x += b.vx * h2; b.y += b.vy * h2;
+          const f = Math.max(0, 1 - 0.9 * h2);
+          b.vx *= f; b.vy *= f;
+          if (Math.hypot(b.vx, b.vy) < 4) { b.vx = 0; b.vy = 0; }
+          if (b.x < rail + R) { b.x = rail + R; b.vx = Math.abs(b.vx) * 0.85; }
+          if (b.x > W - rail - R) { b.x = W - rail - R; b.vx = -Math.abs(b.vx) * 0.85; }
+          if (b.y < rail + R) { b.y = rail + R; b.vy = Math.abs(b.vy) * 0.85; }
+          if (b.y > H - rail - R) { b.y = H - rail - R; b.vy = -Math.abs(b.vy) * 0.85; }
+          for (const [px, py] of pockets) if (Math.hypot(b.x - px, b.y - py) < R * 1.9) {
+            if (b.n === 0) { b.x = W * 0.25; b.y = H / 2; b.vx = b.vy = 0; info.textContent = 'Scratch! The white ball is back on the spot.'; }
+            else { b.in = true; potted++; info.textContent = `Potted! ${potted}/10 in ${shots} shots.`; if (potted === 10) info.textContent = `Cleared the table in ${shots} shots! 🎱`; }
+          }
+        }
+        for (let i = 0; i < balls.length; i++) for (let j = i + 1; j < balls.length; j++) {
+          const a = balls[i], b = balls[j];
+          if (a.in || b.in) continue;
+          const dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy);
+          if (d > 0 && d < R * 2) {
+            const nx = dx / d, ny = dy / d, ov = (R * 2 - d) / 2;
+            a.x -= nx * ov; a.y -= ny * ov; b.x += nx * ov; b.y += ny * ov;
+            const rel = (a.vx - b.vx) * nx + (a.vy - b.vy) * ny;
+            if (rel > 0) { a.vx -= rel * nx * 0.96; a.vy -= rel * ny * 0.96; b.vx += rel * nx * 0.96; b.vy += rel * ny * 0.96; }
+          }
+        }
+      }
+      x.fillStyle = '#3d2a1e'; x.fillRect(0, 0, W, H);
+      x.fillStyle = '#1f6b3a'; x.fillRect(rail - 6, rail - 6, W - rail * 2 + 12, H - rail * 2 + 12);
+      x.fillStyle = '#000'; for (const [px, py] of pockets) { x.beginPath(); x.arc(px, py, R * 1.6, 0, 7); x.fill(); }
+      for (const b of balls) if (!b.in) { x.fillStyle = b.c; x.beginPath(); x.arc(b.x, b.y, R, 0, 7); x.fill(); x.fillStyle = 'rgba(255,255,255,0.35)'; x.beginPath(); x.arc(b.x - 3, b.y - 3, 3, 0, 7); x.fill(); }
+      if (aim) {
+        const cue = balls[0];
+        const dx = cue.x - aim.x, dy = cue.y - aim.y, d = Math.hypot(dx, dy) || 1;
+        x.strokeStyle = 'rgba(255,255,255,0.5)'; x.setLineDash([6, 6]); x.beginPath(); x.moveTo(cue.x, cue.y); x.lineTo(cue.x + (dx / d) * 220, cue.y + (dy / d) * 220); x.stroke(); x.setLineDash([]);
+        x.strokeStyle = '#d9a04a'; x.lineWidth = 5; x.beginPath(); x.moveTo(cue.x - (dx / d) * (R + 4), cue.y - (dy / d) * (R + 4)); x.lineTo(cue.x - (dx / d) * (R + 4 + 160), cue.y - (dy / d) * (R + 4 + 160)); x.stroke(); x.lineWidth = 1;
+        x.fillStyle = '#fff'; x.font = '14px sans-serif'; x.fillText('Power ' + Math.round(Math.min(160, Math.hypot(dx, dy)) / 1.6) + '%', 12, 18);
+      }
+      requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  },
+};
+
+// ------------------------------------------------------------- piano
+const piano: Panel = {
+  title: 'Piano',
+  render(el) {
+    audio.init();
+    const notes = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+    const keyMap = 'awsedftgyhujkolp;';
+    const play = (midi: number) => {
+      const ctx = audio.ctx; if (!ctx) return;
+      const t = ctx.currentTime, f = 440 * Math.pow(2, (midi - 69) / 12);
+      const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.25, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + 1.6);
+      for (const [type, mul, v] of [['triangle', 1, 1], ['sine', 2, 0.3], ['sine', 3, 0.1]] as const) {
+        const o = ctx.createOscillator(); o.type = type; o.frequency.value = f * mul;
+        const og = ctx.createGain(); og.gain.value = v; o.connect(og).connect(g); o.start(t); o.stop(t + 1.7);
+      }
+      g.connect(audio.musicBus);
+      api.emote('type', 2);
+    };
+    const kb = h('div.piano');
+    for (let i = 0; i < 17; i++) {
+      const midi = 60 + i, black = notes[midi % 12].includes('#');
+      const k = h('button.pkey' + (black ? '.black' : ''), { onpointerdown: (e: Event) => { e.preventDefault(); play(midi); k.classList.add('down'); setTimeout(() => k.classList.remove('down'), 150); } }, h('small', keyMap[i] ?? ''));
+      kb.append(k);
+    }
+    const onKey = (e: KeyboardEvent) => { const i = keyMap.indexOf(e.key); if (i >= 0 && !e.repeat) { play(60 + i); (kb.children[i] as HTMLElement)?.classList.add('down'); setTimeout(() => (kb.children[i] as HTMLElement)?.classList.remove('down'), 150); } };
+    window.addEventListener('keydown', onKey);
+    const stop = () => { if (!kb.isConnected) { window.removeEventListener('keydown', onKey); } else setTimeout(stop, 1000); };
+    setTimeout(stop, 1000);
+    add(el, kb, h('small.muted', 'Tap the keys (or use A W S E D F T G Y H U J K on a keyboard). Everyone in the room can hear you.'),
+      h('div.row', btn('Play a melody', async () => { for (const n of [64, 62, 60, 62, 64, 64, 64, 62, 62, 62, 64, 67, 67]) { play(n); await new Promise((r) => setTimeout(r, 320)); } }, 'ghost')));
+  },
+  onClose() { api.stand(); },
+};
+
 const quality: Panel = { title: 'Graphics', render(el, _rr, d) { api.setQuality(d.q); add(el, h('p', `Graphics quality set to ${d.q}.`)); setTimeout(() => api.closePanel(), 600); } };
 
 export const PANELS: Record<string, Panel> = {
-  menu, boutique, wardrobe, mirror, furniture, decorate, realestate, dealer, sellcar, customs, transport, callcar, work, pitch, defi, vip, react, computer, arcade, quality,
+  menu, pool, piano, boutique, wardrobe, mirror, furniture, decorate, realestate, dealer, sellcar, customs, transport, callcar, work, pitch, defi, vip, react, computer, arcade, quality,
 };

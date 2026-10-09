@@ -29,6 +29,7 @@ export interface GameAPI {
   testDrive(model: string): void;
   setQuality(q: 'low' | 'medium' | 'high'): void;
   teleportLocal(x: number, z: number, y?: number): void;
+  placeAt(pos: THREE.Vector3, heading: number): void;
 }
 
 export const api = {} as GameAPI;

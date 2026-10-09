@@ -220,6 +220,7 @@ Object.assign(api, {
     exitBuilding();
   },
   setQuality: (q: 'low' | 'medium' | 'high') => { R.setQuality(q); env.setShadowSize(q === 'high' ? 4096 : 2048); },
+  placeAt: (p: THREE.Vector3, heading: number) => { player.stand(); player.teleport(p.clone().setY(0), heading); },
   teleportLocal: (x: number, z: number, y = 0) => { if (interior) player.teleport(new THREE.Vector3(3000 + x, y, z), Math.PI); },
 });
 let pendingCar: string | null = null;
@@ -309,7 +310,7 @@ function start() {
   requestAnimationFrame(loop);
   // debug handle (used by automated browser checks)
   (window as any).cc = {
-    player, scene, R, env, city, store, hud,
+    player, scene, R, env, city, store, hud, interact,
     get interior() { return interior; }, get zone() { return zone; },
     tp(z: string) { const d = city.doors.find((x) => x.zone === z); if (d) player.teleport(d.pos.clone().add(new THREE.Vector3(Math.sin(d.facing) * 2, 0, Math.cos(d.facing) * 2)), d.facing + Math.PI); },
     time(m: number) { store.clock = { minutes: m, day: store.clock.day, at: performance.now() }; },

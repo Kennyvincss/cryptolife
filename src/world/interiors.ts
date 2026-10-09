@@ -58,12 +58,24 @@ class Kit {
   }
   w(x: number, z: number, y = 0) { return new THREE.Vector3(INTERIOR_ORIGIN.x + x, y, INTERIOR_ORIGIN.z + z); }
 
-  put(obj: THREE.Object3D, x: number, z: number, rot = 0, y = 0, col: [number, number] | false = false, batch = true) {
+  /**
+   * Place an object. `col`: explicit footprint, false for none, or 'auto' (default)
+   * to derive a collision box from the object's real bounds — anything standing on
+   * the floor and taller than ankle height becomes solid, so players can't walk into it.
+   */
+  put(obj: THREE.Object3D, x: number, z: number, rot = 0, y = 0, col: [number, number] | false | 'auto' = 'auto', batch = true) {
     obj.position.set(x, y, z);
     obj.rotation.y = rot;
     obj.updateMatrixWorld(true);
+    if (col === 'auto') {
+      const b = new THREE.Box3().setFromObject(obj);
+      const sx = b.max.x - b.min.x, sz = b.max.z - b.min.z;
+      if (b.min.y < 0.45 && b.max.y > 0.3 && sx > 0.12 && sz > 0.12) {
+        const m = 0.04;
+        this.colliders.add({ minX: INTERIOR_ORIGIN.x + b.min.x + m, maxX: INTERIOR_ORIGIN.x + b.max.x - m, minZ: INTERIOR_ORIGIN.z + b.min.z + m, maxZ: INTERIOR_ORIGIN.z + b.max.z - m, h: b.max.y, tag: 'furniture' });
+      }
+    } else if (col) this.colliders.addRotated(INTERIOR_ORIGIN.x + x, INTERIOR_ORIGIN.z + z, col[0], col[1], rot, 'furniture');
     if (batch) this.B.addObject(obj); else this.group.add(obj);
-    if (col) this.colliders.addRotated(INTERIOR_ORIGIN.x + x, INTERIOR_ORIGIN.z + z, col[0], col[1], rot, 'furniture');
     return obj;
   }
   box(w: number, h: number, d: number, m: THREE.Material, x: number, y: number, z: number, col = false) {
@@ -282,7 +294,7 @@ function buildHome(k: Kit, home: HomeData) {
   };
   const decorAct = (x: number, z: number) => {
     if (!own) return;
-    k.put(F.toolbox(), x, z, 0, 0, false);
+    k.put(F.toolbox(), x, z, 0, 0);
     k.act(x, z, 'Decorate home', () => api.panel('decorate'), 1.5);
     k.act(x, z, 'Garage & vehicles', () => api.panel('garage'), 1.5, 'R');
   };
@@ -435,7 +447,7 @@ function buildHome(k: Kit, home: HomeData) {
     tvAct(-7, 5.4, tvG.userData.screen);
     k.put(F.speakerStack(), -10.5, 1.2, 0, 0, [1, 0.8]);
     k.act(-10.5, 2.0, 'Play music on speakers', () => api.setSpeakerMusic(k.w(-7, 1.6, 1.4)), 1.4, 'R');
-    k.put(F.piano(), -10.2, 4.2, Math.PI / 2, 0, [1.6, 1.9]);
+    { const pn = F.piano(); k.put(pn, -10.2, 4.2, Math.PI / 2, 0, 'auto'); furnitureActs(k, 'piano', 'piano', -10.2, 4.2, Math.PI / 2, pn, own, 0, true); }
     // kitchen island & dining
     k.put(F.counter(4.0, true, true), 9.0, 8.6, Math.PI, 0, [4, 0.65]);
     k.put(F.fridge(), 11.5, 8.5, Math.PI, 0, [0.8, 0.7]);
@@ -464,34 +476,52 @@ function buildHome(k: Kit, home: HomeData) {
     if (!s || !fd) continue;
     const obj = fd.model === 'trophy' ? F.trophyShelf(n) : F.catalogModel(fd.model);
     const dynamic = ['aquarium', 'smartlights', 'tv55', 'tv85', 'lamp'].includes(fd.model);
-    k.put(obj, s[0], s[1], s[2], 0, ['rug', 'smartlights', 'aircon', 'camera', 'art_small', 'art_large'].includes(fd.model) ? false : [1.0, 0.8], !dynamic);
+    k.put(obj, s[0], s[1], s[2], 0, ['rug', 'smartlights', 'aircon', 'camera', 'art_small', 'art_large'].includes(fd.model) ? false : 'auto', !dynamic);
     furnitureActs(k, fd.model, fd.name, s[0], s[1], s[2], obj, own, n);
   }
   if (!own) k.sign(`@${home.owner}'s home`, '#38f2a5', 3, 0, 2.4, D / 2 - 0.15, Math.PI);
   void def;
 }
 
-function furnitureActs(k: Kit, model: string, name: string, x: number, z: number, rot: number, obj: THREE.Object3D, own: boolean, achievements: number) {
-  const fx = x + Math.sin(rot) * 0.9, fz = z + Math.cos(rot) * 0.9;
+/**
+ * Interactions for usable objects. Used for furniture placed at home and for the
+ * try-out display pieces in shops. `demo` skips server-side home rewards.
+ */
+function furnitureActs(k: Kit, model: string, name: string, x: number, z: number, rot: number, obj: THREE.Object3D, own: boolean, achievements: number, demo = false) {
+  // interaction zone sized from the object's real footprint, so it's reachable from any side
+  const b = new THREE.Box3().setFromObject(obj);
+  const reach = Math.max(b.max.x - b.min.x, b.max.z - b.min.z) / 2 + 1.0;
+  const cx = (b.min.x + b.max.x) / 2, cz = (b.min.z + b.max.z) / 2;
+  const fwd = new THREE.Vector3(Math.sin(rot), 0, Math.cos(rot));
+  const depth = Math.abs(fwd.x) * (b.max.x - b.min.x) / 2 + Math.abs(fwd.z) * (b.max.z - b.min.z) / 2;
+  const front = k.w(cx + fwd.x * (depth + 0.45), cz + fwd.z * (depth + 0.45)); // standing spot facing the object
+  const use = (label: string, fn: () => void, key: 'E' | 'R' = 'R') => k.act(cx, cz, label, fn, reach, key);
+  const home = (what: string, ok: string) => { if (demo) return; act('activity.home', { what }).then(() => api.toast(ok)).catch((e) => api.toast(e.message)); };
+  const faceIt = () => api.placeAt(front, rot + Math.PI);
   switch (model) {
     case 'armchair': k.seat(x + Math.sin(rot) * 0.1, z + Math.cos(rot) * 0.1, rot); break;
-    case 'speaker': case 'tower_speaker': k.act(fx, fz, 'Play music on speakers', () => api.setSpeakerMusic(k.w(x, z, 1)), 1.4, 'R'); break;
-    case 'tv55': case 'tv85': { const s = newsScreen(); if (obj.userData.screen) { (obj.userData.screen as THREE.Mesh).material = s.mat; k.screens.push(s); s.draw(); } k.act(fx, fz, 'Watch CityNews', () => api.panel('news'), 1.6, 'R'); break; }
-    case 'console': case 'arcade': k.act(fx, fz, 'Play Block Breaker', () => api.panel('arcade'), 1.4, 'R'); break;
-    case 'bookshelf': k.act(fx, fz, 'Read a book', () => { api.emote('phone', 4); act('activity.home', { what: 'read' }).then(() => api.toast('+Research XP')).catch((e) => api.toast(e.message)); }, 1.3, 'R'); break;
-    case 'rig': k.act(fx, fz, 'Use trading rig', () => { if (own) { api.sit(k.w(fx, fz), rot + Math.PI, 'type'); api.panel('trade'); act('activity.home', { what: 'rig' }).catch(() => {}); } }, 1.4, 'R'); break;
-    case 'gym': k.act(fx, fz, 'Work out', () => { api.emote('workout', 8); act('activity.home', { what: 'gym' }).then(() => api.toast('Good workout — rested bonus.')).catch((e) => api.toast(e.message)); }, 1.6, 'R'); break;
-    case 'bar': k.act(fx, fz, 'Mix a mocktail', () => { api.hold('glass'); api.toast('Citrus mocktail, alcohol-free.'); }, 1.6, 'R'); break;
-    case 'pool': k.act(fx, fz, 'Shoot pool', () => api.emote('phone', 3), 1.8, 'R'); break;
-    case 'aquarium': { const fish = obj.userData.fish as THREE.Group; k.updaters.push((dt, t) => fish.children.forEach((f, i) => { f.position.x = Math.sin(t * 0.4 + i) * 0.45; f.rotation.y = Math.cos(t * 0.4 + i) > 0 ? 0 : Math.PI; })); k.act(fx, fz, 'Watch the fish', () => api.emote('idle', 4), 1.4, 'R'); break; }
-    case 'smartlights': { const m = obj.userData.lightMat as THREE.MeshStandardMaterial; let hue = 0.7; k.act(fx, fz, 'Cycle light colors', () => { hue = (hue + 0.15) % 1; m.emissive.setHSL(hue, 0.9, 0.5); }, 2, 'R'); break; }
-    case 'lamp': { const b = obj.userData.bulb as THREE.Mesh; let on = true; k.act(fx, fz, 'Toggle lamp', () => { on = !on; (b.material as THREE.MeshStandardMaterial).emissiveIntensity = on ? 0.6 : 0; }, 1.3, 'R'); break; }
-    case 'trophy': k.act(fx, fz, `Trophy shelf (${achievements} achievements)`, () => api.panel('profile'), 1.4, 'R'); break;
-    case 'camera': k.act(fx, fz, 'Check security camera', () => api.toast('All clear. No intruders.'), 1.4, 'R'); break;
-    case 'aircon': k.act(fx, fz, 'Toggle A/C', () => api.toast('A/C toggled.'), 1.4, 'R'); break;
+    case 'speaker': case 'tower_speaker': use('Play music on speakers', () => api.setSpeakerMusic(k.w(x, z, 1))); break;
+    case 'tv55': case 'tv85': { const sc = newsScreen(); if (obj.userData.screen) { (obj.userData.screen as THREE.Mesh).material = sc.mat; k.screens.push(sc); sc.draw(); } use('Watch CityNews', () => { faceIt(); api.panel('news'); }); break; }
+    case 'console': use('Play video games', () => { faceIt(); api.emote('phone', 30); api.panel('arcade'); }); break;
+    case 'arcade': use('Play the arcade', () => { faceIt(); api.panel('arcade'); }); break;
+    case 'bookshelf': use('Read a book', () => { faceIt(); api.emote('phone', 6); home('read', '+Research XP from reading'); }); break;
+    case 'rig': use('Use trading rig', () => { api.sit(front, rot + Math.PI, 'type', 0.5); api.panel('trade'); home('rig', 'Trading practice: +Trading XP'); }); break;
+    case 'gym': use('Work out', () => { faceIt(); api.emote('workout', 12); home('gym', 'Good workout — rested bonus (+10% XP).'); }); break;
+    case 'bar': use('Mix a mocktail', () => { faceIt(); api.hold('glass'); api.toast('Citrus mocktail, alcohol-free.'); }); break;
+    case 'pool': use('Play pool (snooker)', () => { faceIt(); api.panel('pool'); }); break;
+    case 'piano': use('Play the piano', () => { api.sit(front, rot + Math.PI, 'type', 0.5); api.panel('piano'); }); break;
+    case 'aquarium': { const fish = obj.userData.fish as THREE.Group; k.updaters.push((dt, t) => fish.children.forEach((f, i) => { f.position.x = Math.sin(t * 0.4 + i) * 0.45; f.rotation.y = Math.cos(t * 0.4 + i) > 0 ? 0 : Math.PI; })); use('Feed the fish', () => { faceIt(); api.emote('wave', 3); api.toast('The fish swarm to the food. 🐠'); }); break; }
+    case 'smartlights': { const m = obj.userData.lightMat as THREE.MeshStandardMaterial; let hue = 0.7; use('Cycle light colors', () => { hue = (hue + 0.15) % 1; m.emissive.setHSL(hue, 0.9, 0.5); }); break; }
+    case 'lamp': { const bl = obj.userData.bulb as THREE.Mesh; let on = true; use('Toggle lamp', () => { on = !on; (bl.material as THREE.MeshStandardMaterial).emissiveIntensity = on ? 0.6 : 0; }); break; }
+    case 'trophy': use(`Trophy shelf (${achievements} achievements)`, () => api.panel('profile')); break;
+    case 'camera': use('Check security camera', () => api.toast('All clear. No intruders.')); break;
+    case 'aircon': use('Toggle A/C', () => api.toast('A/C toggled.')); break;
+    case 'plant': use('Water the plant', () => { faceIt(); api.emote('wave', 2); api.toast('The plant looks happier. 🌿'); }); break;
+    case 'art_small': case 'art_large': use('Admire the art', () => { faceIt(); api.toast('A generative piece. You notice new details every time.'); }); break;
+    case 'rug': break;
     default: break;
   }
-  void name;
+  void name; void own;
 }
 
 // ------------------------------- FOOD --------------------------------------
@@ -562,12 +592,12 @@ function restaurant(k: Kit, accent: string, fine: boolean) {
       k.put(F.chair(fine ? '#1d1d20' : '#5a3a24'), x, cz, s > 0 ? Math.PI : 0);
       k.act(x, cz, 'Sit & order', () => { api.sit(k.w(x, cz), s > 0 ? Math.PI : 0, 'sit', 0.45); api.panel('menu', { venue }); }, 1.0);
     }
-    if (fine) k.put(F.floorLamp(), x + 1.1, z, 0, 0, false, false);
+    if (fine) k.put(F.floorLamp(), x + 1.1, z, 0, 0, 'auto', false);
     const candle = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.12, 8), glowMat('#ffcc66', 3));
     candle.position.set(x, 0.85, z); k.group.add(candle);
     if (i === 1 || i === 4) { k.npc(x, z - 0.75, 0, 'eat', 60 + i, 'Diner (NPC)', 0.45); k.npc(x, z + 0.75, Math.PI, 'talk', 70 + i, 'Diner (NPC)', 0.45); }
   });
-  if (fine) { k.put(F.piano(), 7.4, -4.6, -Math.PI / 4, 0, [1.6, 1.9]); k.put(F.art(5, 1.6, 1.0), -8.85, 0, Math.PI / 2); k.put(F.art(6, 1.6, 1.0), 8.85, 0, -Math.PI / 2); }
+  if (fine) { const pn = F.piano(); k.put(pn, 7.4, -4.6, -Math.PI / 2, 0, 'auto'); furnitureActs(k, 'piano', 'piano', 7.4, -4.6, -Math.PI / 2, pn, false, 0, true); k.put(F.art(5, 1.6, 1.0), -8.85, 0, Math.PI / 2); k.put(F.art(6, 1.6, 1.0), 8.85, 0, -Math.PI / 2); }
   k.window(-8.88, 2, 3.5, 2.4, 2, Math.PI / 2); k.window(8.88, 2, 3.5, 2.4, 2, -Math.PI / 2);
   for (const [x, z] of [[-5, 0.5], [0, 0.5], [5, 0.5], [-5, -4.5]]) k.light(x, fine ? 4.1 : 3.5, z, fine ? 0xffc890 : 0xffe0b0, fine ? 14 : 22, 10);
   k.music = { station: fine ? 'jazz' : 'lofi', pos: k.w(0, 0, 3), volume: 0.4 };
@@ -617,7 +647,7 @@ function club(k: Kit, accent: string) {
   k.act(6, 6, 'VIP area', () => api.panel('vip'), 2.4);
   for (const [x, z, r] of [[11, 9.6, Math.PI], [13.8, 6, -Math.PI / 2]]) { k.put(F.sofa('#3a0f2a', 3), x, z, r, 0.6, false); }
   for (const [x, z, r] of [[10, 9.5, Math.PI], [12, 9.5, Math.PI], [13.7, 5, -Math.PI / 2], [13.7, 7, -Math.PI / 2]]) k.act(x, z, 'Sit (VIP)', () => api.sit(k.w(x, z, 0.6), r, 'sit', 1.05), 1.0, 'E', undefined, 0.6);
-  k.put(F.roundTable(0.5, 0.5, F.M.gold()), 11.5, 7.5, 0, 0.6, false);
+  k.put(F.roundTable(0.5, 0.5, F.M.gold()), 11.5, 7.5, 0, 0.6, [0.9, 0.9]);
   // dancers
   for (let i = 0; i < 12; i++) {
     const a = (i / 12) * Math.PI * 2;
@@ -843,7 +873,10 @@ function furnitureStore(k: Kit, accent: string) {
   const show = ['tv85', 'aquarium', 'arcade', 'bookshelf', 'gym', 'bar', 'pool', 'armchair', 'tower_speaker', 'plant', 'lamp', 'rig'];
   show.forEach((m, i) => {
     const x = -8 + (i % 4) * 5.3, z = -4.5 + Math.floor(i / 4) * 4.2;
-    k.put(F.catalogModel(m), x, z, 0, 0, [1.4, 1.0]);
+    const obj = F.catalogModel(m);
+    const dynamic = ['aquarium', 'smartlights', 'tv55', 'tv85', 'lamp'].includes(m);
+    k.put(obj, x, z, 0, 0, 'auto', !dynamic);
+    furnitureActs(k, m, m, x, z, 0, obj, false, 0, true);
   });
   k.put(F.counterBar(3, '#5a3a24'), 7, 6, Math.PI, 0, [3.1, 0.85]);
   k.npc(7, 6.8, Math.PI, 'idle', 1401, 'Sales (NPC)');
@@ -1018,8 +1051,8 @@ function whaleclub(k: Kit, accent: string) {
   }
   k.put(F.roundTable(0.5, 0.55, F.M.gold()), -4.8, 0.5, 0, 0, [0.9, 0.9]);
   k.put(F.roundTable(0.5, 0.55, F.M.gold()), 4.8, 0.5, 0, 0, [0.9, 0.9]);
-  k.put(F.piano(), 8, -5.5, -0.6, 0, [1.6, 1.9]);
-  k.put(F.aquarium(), -9, -5.5, Math.PI / 2, 0, [0.5, 1.2], false);
+  { const pn = F.piano(); k.put(pn, 8, -5.5, -Math.PI / 2, 0, 'auto'); furnitureActs(k, 'piano', 'piano', 8, -5.5, -Math.PI / 2, pn, false, 0, true); }
+  { const aq = F.aquarium(); k.put(aq, -9, -5.5, Math.PI / 2, 0, 'auto', false); furnitureActs(k, 'aquarium', 'aquarium', -9, -5.5, Math.PI / 2, aq, false, 0, true); }
   k.npc(-6, 2, Math.PI / 2, 'sit', 2202, 'Whale (NPC)', 0.45);
   k.npc(6, -1, -Math.PI / 2, 'phone', 2203, 'Whale (NPC)', 0.45);
   k.put(F.art(301, 2, 1.3), -10.85, 1, Math.PI / 2); k.put(F.art(302, 2, 1.3), 10.85, 1, -Math.PI / 2);
