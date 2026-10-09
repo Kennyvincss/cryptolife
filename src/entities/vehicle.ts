@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { VEHICLE_BY_ID, type VehicleDef } from '../../shared/catalog.js';
 import { mat, mergeStatic } from '../engine/build.js';
 import type { Colliders } from '../world/colliders.js';
+import { carDims, carModelReady, makeFleetCar } from './carmodel.js';
 
 type Body = VehicleDef['body'];
 
@@ -106,6 +107,12 @@ export interface VehicleVisual {
 export function buildVehicle(model: string, color: string, rims = 'steel'): VehicleVisual {
   const def = VEHICLE_BY_ID[model] ?? VEHICLE_BY_ID['ledger'];
   if (def.body === 'moto') return buildMoto(color, rims, def.id === 'scoot');
+  if (carModelReady()) {
+    // realistic glTF car drawn by the instanced fleet renderer
+    const fc = makeFleetCar(def.body, color, rims);
+    const d = carDims(def.body);
+    return { root: fc.root, wheels: fc.wheels.map((w) => ({ holder: w.holder, spin: w.spin, front: w.front })), brake: fc.brake, head: fc.head, seat: d.seat, dims: { L: d.L, W: d.W, wheelR: d.wheelR, wheelbase: d.wheelbase }, isMoto: false };
+  }
   const d = DIMS[def.body];
   const root = new THREE.Group();
   const paint = paintMat(color);

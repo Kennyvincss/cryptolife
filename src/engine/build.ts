@@ -64,7 +64,7 @@ export class Batcher {
 
   add(geo: THREE.BufferGeometry, material: THREE.Material, pos?: THREE.Vector3Like, rotY = 0, scale?: THREE.Vector3Like, rot?: THREE.Euler) {
     const g = geo.index ? geo.toNonIndexed() : geo.clone();
-    for (const k of Object.keys(g.attributes)) if (!['position', 'normal', 'uv'].includes(k)) g.deleteAttribute(k);
+    for (const k of Object.keys(g.attributes)) if (!['position', 'normal', 'uv', 'aFacade'].includes(k)) g.deleteAttribute(k);
     if (!g.attributes.uv) {
       g.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(g.attributes.position.count * 2), 2));
     }
@@ -88,7 +88,7 @@ export class Batcher {
       const m = o as THREE.Mesh;
       if (!m.isMesh) return;
       const g = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry.clone();
-      for (const k of Object.keys(g.attributes)) if (!['position', 'normal', 'uv'].includes(k)) g.deleteAttribute(k);
+      for (const k of Object.keys(g.attributes)) if (!['position', 'normal', 'uv', 'aFacade'].includes(k)) g.deleteAttribute(k);
       if (!g.attributes.uv) g.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(g.attributes.position.count * 2), 2));
       const mw = m.matrixWorld.clone();
       if (offset) mw.premultiply(offset);
@@ -184,7 +184,7 @@ export function mergeStatic(root: THREE.Object3D, stops: Set<THREE.Object3D> = n
       const m = c as THREE.Mesh;
       if (m.isMesh && !Array.isArray(m.material)) {
         const g = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry.clone();
-        for (const k of Object.keys(g.attributes)) if (!['position', 'normal', 'uv'].includes(k)) g.deleteAttribute(k);
+        for (const k of Object.keys(g.attributes)) if (!['position', 'normal', 'uv', 'aFacade'].includes(k)) g.deleteAttribute(k);
         if (!g.attributes.uv) g.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(g.attributes.position.count * 2), 2));
         g.applyMatrix4(new THREE.Matrix4().multiplyMatrices(inv, m.matrixWorld));
         let arr = buckets.get(m.material);

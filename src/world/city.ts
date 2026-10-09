@@ -13,6 +13,9 @@ import {
 import { buildVehicle } from '../entities/vehicle.js';
 import { Colliders } from './colliders.js';
 import { buildOcean, type Ocean } from './water.js';
+import { boxWalls, facadeMaterial, type FacadeKind } from './facade.js';
+import { surfaceMaterial, wearPaint } from './pbr.js';
+import type { TreeSpot } from './trees.js';
 
 export const CURB_H = 0.15;
 
@@ -30,6 +33,9 @@ export interface CityBuild {
   screens: { draw: (prices: Record<string, number>, open: Record<string, number>, t: number) => void }[];
   groundAt: (x: number, z: number) => number;
   ocean: Ocean;
+  trees: TreeSpot[];
+  /** Places the parked cars (call after the car model loads). */
+  populateParked: () => void;
   footprints: { x: number; z: number; w: number; d: number; h: number; district: DistrictId; feature?: string }[];
 }
 
@@ -48,7 +54,7 @@ const DISTRICT_H: Record<DistrictId, [number, number]> = {
   trading: [45, 150], builder: [20, 85], defi: [28, 80], social: [9, 28], creator: [14, 48], residential: [12, 42], automotive: [6, 14], convention: [10, 24], park: [0, 0],
 };
 
-export function buildCity(): CityBuild {
+export function buildCity(lowQuality = false): CityBuild {
   const group = new THREE.Group();
   group.name = 'city';
   const colliders = new Colliders();
@@ -60,6 +66,17 @@ export function buildCity(): CityBuild {
   const screens: CityBuild['screens'] = [];
   const footprints: CityBuild['footprints'] = [];
   const R = rng(1234);
+  const trees: TreeSpot[] = [];
+  const parked: { model: string; color: string; x: number; z: number; rot: number }[] = [];
+  const pitM = mat('treepit', { color: '#3a2c22', roughness: 1 });
+  const pitEdge = mat('pitedge', { color: '#2b2d30', roughness: 0.5, metalness: 0.6 });
+  const KINDS: Record<FacadeStyle, FacadeKind[]> = {
+    glass: ['curtain', 'curtain', 'office'], concrete: ['office', 'stone', 'office'], brick: ['brick', 'brick', 'industrial'], marble: ['stone'],
+    neon: ['dark', 'office'], industrial: ['industrial', 'brick'], residential: ['plaster', 'brick', 'plaster'], villa: ['plaster'],
+  };
+  let bseed = 1;
+  type Side = 'n' | 's' | 'e' | 'w';
+
 
   const facadeMats = new Map<string, THREE.MeshStandardMaterial>();
   function facadeMat(style: FacadeStyle, seed: number) {
@@ -76,8 +93,13 @@ export function buildCity(): CityBuild {
     facadeMats.set(key, m);
     return m;
   }
-  const roofM = mat('roof', { color: '#4a4c50', roughness: 0.95 });
-  const roofTrim = mat('rooftrim', { color: '#6b6e73', roughness: 0.8 });
+  const roofM = surfaceMaterial('roof', { tile: 6, mode: 'ground', macro: 0.35 });
+  const roofTrim = surfaceMaterial('concrete', { tile: 3, mode: 'wall', color: '#c9c4ba', macro: 0.2 });
+  const parapetM = surfaceMaterial('concrete', { tile: 3, mode: 'wall', color: '#a8a39a', macro: 0.3 });
+  const stoneTrim = surfaceMaterial('stone', { tile: 3, mode: 'wall', macro: 0.15 });
+  const hvacM = mat('hvac', { color: '#a9adb1', roughness: 0.45, metalness: 0.6 });
+  const hvacDark = mat('hvacdark', { color: '#3c4044', roughness: 0.5, metalness: 0.5 });
+  const ventM = mat('vent', { color: '#202224', roughness: 0.7, metalness: 0.3 });
 
   // ---------------- ground ----------------
   const minX = ROAD_X[0] - ROAD / 2, maxX = ROAD_X[ROAD_X.length - 1] + ROAD / 2;
@@ -85,7 +107,8 @@ export function buildCity(): CityBuild {
   const asph = asphalt().clone();
   asph.repeat.set((maxX - minX) / 10, (maxZ - minZ) / 10);
   asph.needsUpdate = true;
-  const road = new THREE.Mesh(new THREE.PlaneGeometry(maxX - minX, maxZ - minZ), new THREE.MeshStandardMaterial({ map: asph, roughness: 0.92, metalness: 0, color: 0xe0e0e0 }));
+  void asph;
+  const road = new THREE.Mesh(new THREE.PlaneGeometry(maxX - minX, maxZ - minZ), surfaceMaterial('asphalt', { tile: 5, mode: 'ground', macro: 0.45, wet: true, normalScale: 1.2 }));
   road.rotation.x = -Math.PI / 2;
   road.position.set((minX + maxX) / 2, 0, (minZ + maxZ) / 2);
   road.receiveShadow = true;
@@ -100,8 +123,8 @@ export function buildCity(): CityBuild {
   group.add(outer);
 
   // markings
-  const markM = new THREE.MeshStandardMaterial({ map: roadMarkings(), transparent: true, roughness: 0.7, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 });
-  const crossM = new THREE.MeshStandardMaterial({ map: crosswalk(), transparent: true, roughness: 0.7, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 });
+  const markM = wearPaint(new THREE.MeshStandardMaterial({ map: roadMarkings(), transparent: true, roughness: 0.6, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 }));
+  const crossM = wearPaint(new THREE.MeshStandardMaterial({ map: crosswalk(), transparent: true, roughness: 0.6, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 }), 0.7);
   for (const rx of ROAD_X) for (let j = 0; j < ROWS; j++) {
     const z0 = ROAD_Z[j] + ROAD / 2, z1 = ROAD_Z[j + 1] - ROAD / 2;
     const g = planeUV(ROAD, z1 - z0, ROAD, ROAD);
@@ -116,9 +139,10 @@ export function buildCity(): CityBuild {
   }
 
   // ---------------- blocks ----------------
-  const swM = new THREE.MeshStandardMaterial({ map: sidewalk(), roughness: 0.9, color: 0xdedede });
-  const curbM = mat('curb', { color: '#9b9a95', roughness: 0.85 });
-  const grassM = new THREE.MeshStandardMaterial({ map: (() => { const t = grass().clone(); t.repeat.set(1, 1); return t; })(), roughness: 1 });
+  const swM = surfaceMaterial('sidewalk', { tile: 3, mode: 'wall', macro: 0.3, wet: true });
+  const curbM = surfaceMaterial('concrete', { tile: 2, mode: 'wall', color: '#d6d2c8', macro: 0.2 });
+  const grassM = surfaceMaterial('grass', { tile: 3, mode: 'ground', macro: 0.5 });
+  void sidewalk; void grass;
   const lampBulb = mat('lampbulb', { color: '#fff3d6', emissive: '#ffd9a0', emissiveIntensity: 0.2, roughness: 0.3 });
   nightMats.push({ m: lampBulb, base: 0.2, night: 6 });
   const featureOf = new Map<string, Feature[]>();
@@ -160,53 +184,170 @@ export function buildCity(): CityBuild {
       if (isCenter) h *= 1.15;
       const styles = DISTRICT_STYLE[district];
       const style = styles[Math.floor(R() * styles.length)];
-      buildTower(px, pz, w, d, h, style, Math.floor(R() * 4), district);
+      const street: Side[] = [];
+      if (i === 0) street.push('w'); if (i === 2) street.push('e'); if (j === 0) street.push('n'); if (j === 2) street.push('s');
+      buildTower(px, pz, w, d, Math.max(h, 9), style, Math.floor(R() * 4), district, undefined, street);
     }
     // sidewalk props around the block
     propsAround(bx, bz, district);
   }
 
   // ---------------- building helpers ----------------
-  function buildTower(x: number, z: number, w: number, d: number, h: number, style: FacadeStyle, seed: number, district: DistrictId, featureZone?: string) {
-    const fm = facadeMat(style, seed);
-    const glassTall = style === 'glass' && h > 50;
-    const tiers = glassTall && R() < 0.6 ? 2 : 1;
-    let y = 0;
-    let cw = w, cd = d;
-    for (let t = 0; t < tiers; t++) {
-      const th = tiers === 1 ? h : t === 0 ? h * 0.65 : h * 0.35;
-      B.add(tiledBox(cw, th, cd, FACADE_TILE.w, FACADE_TILE.h), fm, { x, y: y + th / 2, z });
-      B.add(new THREE.BoxGeometry(cw + 0.4, 0.5, cd + 0.4), roofTrim, { x, y: y + th + 0.25, z });
-      B.add(new THREE.PlaneGeometry(cw, cd), roofM, { x, y: y + th + 0.51, z }, 0, undefined, new THREE.Euler(-Math.PI / 2, 0, 0));
-      y += th + 0.5;
-      cw *= 0.72; cd *= 0.72;
+  /** One rectangular mass with facade walls, cornice, parapet and roof. Returns the roof level. */
+  function mass(x: number, z: number, w: number, d: number, y0: number, y1: number, kind: FacadeKind, seed: number, o: { shopSides?: Side[]; plainGround?: boolean; base?: number } = {}) {
+    const fm = facadeMaterial(kind, lowQuality);
+    const base = o.base ?? y0;
+    for (const g of boxWalls(x, z, w, d, y0, y1, base, { seed, shop: !!o.shopSides?.length, shopSides: o.shopSides, plainGround: o.plainGround })) B.add(g, fm);
+    // cornice / cap
+    const trim = kind === 'curtain' || kind === 'dark' ? hvacDark : kind === 'stone' || kind === 'brick' ? stoneTrim : roofTrim;
+    const over = kind === 'curtain' ? 0.12 : kind === 'brick' || kind === 'stone' ? 0.45 : 0.25;
+    B.add(new THREE.BoxGeometry(w + over * 2, kind === 'curtain' ? 0.35 : 0.55, d + over * 2), trim, { x, y: y1 - 0.2, z });
+    if (kind === 'stone' || kind === 'brick') B.add(new THREE.BoxGeometry(w + 0.16, 0.28, d + 0.16), trim, { x, y: y1 - 0.9, z });
+    // parapet: roof sits 1 m below the top, with inner walls
+    const roofY = y1 - 1.0, t = 0.3;
+    B.add(new THREE.PlaneGeometry(w - t * 2, d - t * 2), roofM, { x, y: roofY, z }, 0, undefined, new THREE.Euler(-Math.PI / 2, 0, 0));
+    for (const [px, pz, pw, pd] of [[x, z - d / 2 + t / 2, w, t], [x, z + d / 2 - t / 2, w, t], [x - w / 2 + t / 2, z, t, d], [x + w / 2 - t / 2, z, t, d]]) {
+      B.add(new THREE.BoxGeometry(pw - 0.02, 1.0, pd - 0.02), parapetM, { x: px, y: roofY + 0.5, z: pz });
     }
+    return roofY;
+  }
+
+  /** Window-unit air conditioners and balconies aligned with the shader's window grid. */
+  function facadeClutter(x: number, z: number, w: number, d: number, y1: number, kind: FacadeKind, seed: number) {
+    const spec = { brick: [2.8, 3.2, 0.42, 0.3], plaster: [3.0, 3.1, 0.44, 0.3], industrial: [4.2, 4.6, 0.66, 0.35] } as Record<string, number[]>;
+    const sp = spec[kind];
+    if (!sp) return;
+    const [bay, fh, ww, sill] = sp;
+    const r = rng(seed * 7 + 3);
+    const faces: [number, number, [number, number], number][] = [[x, z + d / 2, [0, 1], w], [x, z - d / 2, [0, -1], w], [x + w / 2, z, [1, 0], d], [x - w / 2, z, [-1, 0], d]];
+    const acM = mat('acunit', { color: '#d9dad6', roughness: 0.5, metalness: 0.3 });
+    const balM = surfaceMaterial('concrete', { tile: 2, mode: 'wall', color: '#e4e0d8', macro: 0.1 });
+    const railM = mat('rail_dark', { color: '#26282b', roughness: 0.4, metalness: 0.7 });
+    for (const [cx, cz, n, fw] of faces) {
+      const tdir = new THREE.Vector3(0, 1, 0).cross(new THREE.Vector3(n[0], 0, n[1]));
+      const bays = Math.max(1, Math.floor((fw - 1.2) / bay));
+      const margin = (fw - bays * bay) / 2;
+      const floors = Math.floor((y1 - CURB_H - 4.4 - 1.3) / fh);
+      const balconies = kind === 'plaster' && r() < 0.55;
+      for (let f = 0; f < floors; f++) for (let b = 0; b < bays; b++) {
+        const u = -fw / 2 + margin + (b + 0.5) * bay;
+        const px = cx + tdir.x * u, pz = cz + tdir.z * u;
+        const winBottom = CURB_H + 4.4 + f * fh + sill * fh;
+        const rot = Math.atan2(n[0], n[1]);
+        if (balconies && b % 2 === 0 && f % 1 === 0) {
+          const bw = bay * 0.9;
+          B.add(new THREE.BoxGeometry(bw, 0.16, 1.3), balM, { x: px + n[0] * 0.65, y: CURB_H + 4.4 + f * fh, z: pz + n[1] * 0.65 }, rot);
+          B.add(new THREE.BoxGeometry(bw, 0.05, 0.05), railM, { x: px + n[0] * 1.28, y: CURB_H + 4.4 + f * fh + 1.0, z: pz + n[1] * 1.28 }, rot);
+          for (let k = -4; k <= 4; k++) B.add(new THREE.BoxGeometry(0.03, 1.0, 0.03), railM, { x: px + n[0] * 1.28 + tdir.x * k * bw / 9, y: CURB_H + 4.4 + f * fh + 0.5, z: pz + n[1] * 1.28 + tdir.z * k * bw / 9 });
+        } else if (r() < 0.14) {
+          B.add(new THREE.BoxGeometry(0.62, 0.42, 0.5), acM, { x: px + n[0] * 0.25, y: winBottom - 0.3, z: pz + n[1] * 0.25 }, rot);
+          B.add(new THREE.BoxGeometry(0.5, 0.3, 0.02), ventM, { x: px + n[0] * 0.51, y: winBottom - 0.3, z: pz + n[1] * 0.51 }, rot);
+        }
+      }
+    }
+  }
+
+  function rooftop(x: number, z: number, w: number, d: number, roofY: number, kind: FacadeKind, h: number) {
+    const n = 1 + Math.floor(R() * Math.min(5, w * d / 120));
+    for (let i = 0; i < n; i++) {
+      const ax = x + (R() - 0.5) * (w - 4), az = z + (R() - 0.5) * (d - 4);
+      const big = R() < 0.4;
+      const sx = big ? 3.2 : 1.6, sy = big ? 1.6 : 1.1, sz = big ? 2.2 : 1.2;
+      B.add(new THREE.BoxGeometry(sx, sy, sz), hvacM, { x: ax, y: roofY + sy / 2 + 0.15, z: az });
+      B.add(new THREE.BoxGeometry(sx + 0.2, 0.15, sz + 0.2), hvacDark, { x: ax, y: roofY + 0.075, z: az });
+      if (big) for (const o of [-0.7, 0.7]) B.add(new THREE.CylinderGeometry(0.5, 0.5, 0.12, 16), ventM, { x: ax + o, y: roofY + sy + 0.2, z: az });
+      else B.add(new THREE.BoxGeometry(sx * 0.8, sy * 0.6, 0.02), ventM, { x: ax, y: roofY + sy / 2 + 0.15, z: az + sz / 2 + 0.01 });
+    }
+    // stair / lift bulkhead
+    if (w > 10 && d > 10) {
+      const bx = x + (R() - 0.5) * (w - 8), bz = z + (R() - 0.5) * (d - 8);
+      B.add(new THREE.BoxGeometry(3.4, 3, 4), parapetM, { x: bx, y: roofY + 1.5, z: bz });
+      B.add(new THREE.BoxGeometry(3.7, 0.25, 4.3), roofTrim, { x: bx, y: roofY + 3.1, z: bz });
+    }
+    if ((kind === 'brick' || kind === 'plaster') && R() < 0.45) {
+      // classic timber water tank on a steel stand
+      const tx = x + w * 0.2, tz = z - d * 0.2;
+      B.add(new THREE.CylinderGeometry(1.5, 1.6, 3.0, 16), mat('tankwood', { color: '#5b4330', roughness: 0.95 }), { x: tx, y: roofY + 3.6, z: tz });
+      B.add(new THREE.ConeGeometry(1.7, 0.9, 16), mat('tankroof', { color: '#3a3532', roughness: 0.8 }), { x: tx, y: roofY + 5.55, z: tz });
+      for (let k = 0; k < 3; k++) B.add(new THREE.TorusGeometry(1.58, 0.03, 4, 24), mat('steel', { color: '#444', metalness: 0.6, roughness: 0.5 }), { x: tx, y: roofY + 2.6 + k, z: tz }, 0, undefined, new THREE.Euler(Math.PI / 2, 0, 0));
+      for (const [ox, oz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) B.add(new THREE.CylinderGeometry(0.07, 0.07, 2.1, 6), mat('steel', { color: '#444', metalness: 0.6, roughness: 0.5 }), { x: tx + ox, y: roofY + 1.05, z: tz + oz });
+    }
+    if (h > 60) {
+      B.add(new THREE.CylinderGeometry(0.12, 0.22, 12, 6), mat('antenna', { color: '#b8bcc2', metalness: 0.8, roughness: 0.3 }), { x: x + w * 0.25, y: roofY + 6, z: z + d * 0.25 });
+      B.add(new THREE.SphereGeometry(0.3, 8, 6), glowMat('#ff2020', 4), { x: x + w * 0.25, y: roofY + 12.2, z: z + d * 0.25 });
+      if (R() < 0.5) B.add(new THREE.CylinderGeometry(0.9, 0.9, 0.12, 20), mat('dish', { color: '#e6e6e2', roughness: 0.4, metalness: 0.2 }), { x: x - w * 0.25, y: roofY + 1.2, z: z - d * 0.2 }, 0, undefined, new THREE.Euler(0.9, 0.4, 0));
+    }
+  }
+
+  function buildTower(x: number, z: number, w: number, d: number, h: number, style: FacadeStyle, seed: number, district: DistrictId, featureZone?: string, street: Side[] = []) {
+    const kinds = KINDS[style];
+    const kind = kinds[seed % kinds.length];
+    const id = bseed++;
+    const lively = ['social', 'creator', 'builder', 'trading', 'defi', 'residential'].includes(district);
+    const shopSides = !featureZone && lively ? street : [];
+    // podium + setback tiers for tall towers
+    const tall = h > 50 && (kind === 'curtain' || kind === 'office' || kind === 'stone');
+    let top: number;
+    if (tall && R() < 0.65) {
+      const podH = CURB_H + 4.4 + (kind === 'curtain' ? 3.8 : 3.6) * (2 + Math.floor(R() * 3));
+      mass(x, z, w, d, CURB_H, podH, kind === 'curtain' ? 'office' : kind, id, { shopSides });
+      const w2 = w * (0.72 + R() * 0.12), d2 = d * (0.72 + R() * 0.12);
+      if (R() < 0.5) {
+        const mid = podH + (h - podH) * 0.68;
+        mass(x, z, w2, d2, podH - 1, mid, kind, id + 1, { plainGround: true, base: CURB_H });
+        top = mass(x, z, w2 * 0.8, d2 * 0.8, mid - 1, h, kind, id + 2, { plainGround: true, base: CURB_H });
+        rooftop(x, z, w2 * 0.8, d2 * 0.8, top, kind, h);
+        w = w2 * 0.8; d = d2 * 0.8;
+      } else {
+        top = mass(x, z, w2, d2, podH - 1, h, kind, id + 1, { plainGround: true, base: CURB_H });
+        rooftop(x, z, w2, d2, top, kind, h);
+      }
+    } else {
+      top = mass(x, z, w, d, CURB_H, h, kind, id, { shopSides });
+      rooftop(x, z, w, d, top, kind, h);
+      facadeClutter(x, z, w, d, h, kind, id);
+      // fire escape on brick walk-ups
+      if (kind === 'brick' && h < 40 && street.length) fireEscape(x, z, w, d, h, street[0], id);
+    }
+    if (shopSides.length) awnings(x, z, w, d, shopSides, district);
     colliders.addBox(x, z, w, d, 'building', h);
     footprints.push({ x, z, w, d, h, district, feature: featureZone });
-    // rooftop details
-    const top = y;
-    const n = Math.floor(R() * 4) + 1;
-    for (let i = 0; i < n; i++) {
-      const ax = x + (R() - 0.5) * cw * 0.9, az = z + (R() - 0.5) * cd * 0.9;
-      B.add(new THREE.BoxGeometry(1.6, 1.2, 1.2), mat('ac', { color: '#8d9196', roughness: 0.6, metalness: 0.4 }), { x: ax, y: top + 0.6, z: az });
-    }
-    if ((style === 'residential' || style === 'brick') && R() < 0.4) {
-      B.add(new THREE.CylinderGeometry(1.4, 1.4, 2.6, 12), mat('tank', { color: '#6b4a32', roughness: 0.9 }), { x: x + cw * 0.2, y: top + 2.6, z: z - cd * 0.2 });
-      for (const [ox, oz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) B.add(new THREE.CylinderGeometry(0.08, 0.08, 1.4, 6), mat('steel', { color: '#444', metalness: 0.6, roughness: 0.5 }), { x: x + cw * 0.2 + ox, y: top + 0.7, z: z - cd * 0.2 + oz });
-    }
-    if (h > 70) {
-      B.add(new THREE.CylinderGeometry(0.15, 0.25, 10, 6), mat('antenna', { color: '#b8bcc2', metalness: 0.8, roughness: 0.3 }), { x, y: top + 5, z });
-      B.add(new THREE.SphereGeometry(0.35, 8, 6), glowMat('#ff2020', 4), { x, y: top + 10.2, z });
-    }
-    if (h > 100 && R() < 0.5) {
-      B.add(new THREE.CylinderGeometry(cw * 0.3, cw * 0.3, 0.2, 24), mat('helipad', { color: '#3b3f45', roughness: 0.8 }), { x, y: top + 0.1, z });
-    }
-    // ground-floor storefront glow on street-facing fillers in lively districts
-    if (!featureZone && ['social', 'creator', 'builder', 'trading', 'defi'].includes(district) && R() < 0.55) {
-      const col = DISTRICTS[district].color;
-      B.add(new THREE.BoxGeometry(w + 0.1, 0.25, d + 0.1), glowMatNight(col, 1.4), { x, y: 4.2, z });
-    }
     return top;
+  }
+
+  function fireEscape(x: number, z: number, w: number, d: number, h: number, side: Side, seed: number) {
+    const n = side === 'n' ? [0, -1] : side === 's' ? [0, 1] : side === 'e' ? [1, 0] : [-1, 0];
+    const len = side === 'n' || side === 's' ? w : d;
+    const tdir = new THREE.Vector3(0, 1, 0).cross(new THREE.Vector3(n[0], 0, n[1]));
+    const cx = x + n[0] * (w / 2), cz = z + n[1] * (d / 2);
+    const off = ((seed % 3) - 1) * len * 0.2;
+    const iron = mat('fireescape', { color: '#1b1c1e', roughness: 0.6, metalness: 0.7 });
+    const rot = Math.atan2(n[0], n[1]);
+    for (let y = CURB_H + 4.4 + 3.2; y < h - 2; y += 3.2) {
+      const p = { x: cx + n[0] * 0.75 + tdir.x * off, z: cz + n[1] * 0.75 + tdir.z * off };
+      B.add(new THREE.BoxGeometry(3.2, 0.06, 1.4), iron, { x: p.x, y, z: p.z }, rot);
+      B.add(new THREE.BoxGeometry(3.2, 0.04, 0.04), iron, { x: p.x + n[0] * 0.68, y: y + 0.95, z: p.z + n[1] * 0.68 }, rot);
+      for (let k = -4; k <= 4; k++) B.add(new THREE.BoxGeometry(0.025, 0.95, 0.025), iron, { x: p.x + n[0] * 0.68 + tdir.x * k * 0.38, y: y + 0.48, z: p.z + n[1] * 0.68 + tdir.z * k * 0.38 });
+      // diagonal stair
+      const st = new THREE.BoxGeometry(0.7, 0.05, 3.6);
+      B.add(st, iron, { x: p.x + n[0] * 0.2, y: y + 1.6, z: p.z + n[1] * 0.2 }, 0, undefined, new THREE.Euler(0, rot + Math.PI / 2, 0.75, 'YXZ'));
+    }
+  }
+
+  function awnings(x: number, z: number, w: number, d: number, sides: Side[], district: DistrictId) {
+    const cols = ['#2f4f3f', '#7a1f2a', '#1f2f4a', '#3a3a3a', '#8a5a1a', '#5a2a4a'];
+    for (const side of sides) {
+      if (R() < 0.4) continue;
+      const n = side === 'n' ? [0, -1] : side === 's' ? [0, 1] : side === 'e' ? [1, 0] : [-1, 0];
+      const len = (side === 'n' || side === 's' ? w : d) * (0.3 + R() * 0.4);
+      const tdir = new THREE.Vector3(0, 1, 0).cross(new THREE.Vector3(n[0], 0, n[1]));
+      const off = (R() - 0.5) * ((side === 'n' || side === 's' ? w : d) - len);
+      const cx = x + n[0] * (w / 2 + 0.75) + tdir.x * off, cz = z + n[1] * (d / 2 + 0.75) + tdir.z * off;
+      const rot = Math.atan2(n[0], n[1]);
+      const c = district === 'trading' ? '#222428' : cols[Math.floor(R() * cols.length)];
+      B.add(new THREE.BoxGeometry(len, 0.06, 1.6), mat('awn_' + c, { color: c, roughness: 0.85 }), { x: cx, y: CURB_H + 3.35, z: cz }, 0, undefined, new THREE.Euler(0, rot, 0).setFromQuaternion(new THREE.Quaternion().setFromEuler(new THREE.Euler(0, rot, 0)).multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), 0.32))));
+      B.add(new THREE.BoxGeometry(len, 0.3, 0.03), mat('awn_' + c, { color: c, roughness: 0.85 }), { x: cx + n[0] * 0.78, y: CURB_H + 3.0, z: cz + n[1] * 0.78 }, rot);
+    }
   }
 
   function glowMatNight(color: string, night: number) {
@@ -223,25 +364,23 @@ export function buildCity(): CityBuild {
     const accent = DISTRICTS[district].color;
     if (f.style === 'villa') buildVilla(f, g);
     else {
-      // podium (storefront) + tower
-      const podH = Math.min(6, f.h);
-      const fm = facadeMat(style, 7 + f.zone.length);
+      // podium (venue storefront level, plain so the venue's own frontage reads) + tower
+      const kinds = KINDS[style];
+      const kind = kinds[(7 + f.zone.length) % kinds.length];
+      const id = bseed++;
+      const podH = Math.min(CURB_H + 4.4 + 0.6, f.h);
       const towerH = f.h - podH;
-      const base = mat('podium_' + f.style, { color: f.style === 'marble' ? '#d9d2c2' : f.style === 'glass' ? '#2e3a48' : f.style === 'neon' ? '#1d1a26' : f.style === 'brick' ? '#7a3a2a' : '#7c7f84', roughness: f.style === 'glass' ? 0.2 : 0.7, metalness: f.style === 'glass' ? 0.5 : 0 });
-      B.add(new THREE.BoxGeometry(g.sx, podH, g.sz), base, { x: g.cx, y: podH / 2, z: g.cz });
       if (towerH > 2) {
-        B.add(tiledBox(g.sx - 1, towerH, g.sz - 1, FACADE_TILE.w, FACADE_TILE.h), fm, { x: g.cx, y: podH + towerH / 2, z: g.cz });
-        B.add(new THREE.BoxGeometry(g.sx - 0.6, 0.5, g.sz - 0.6), roofTrim, { x: g.cx, y: f.h + 0.25, z: g.cz });
-        B.add(new THREE.PlaneGeometry(g.sx - 1, g.sz - 1), roofM, { x: g.cx, y: f.h + 0.51, z: g.cz }, 0, undefined, new THREE.Euler(-Math.PI / 2, 0, 0));
+        mass(g.cx, g.cz, g.sx, g.sz, CURB_H, podH, f.style === 'glass' ? 'dark' : kind, id, { shopSides: [f.side] });
+        const top = mass(g.cx, g.cz, g.sx - 1, g.sz - 1, podH - 1, f.h, kind, id + 1, { base: CURB_H, plainGround: true });
+        rooftop(g.cx, g.cz, g.sx - 1, g.sz - 1, top, kind, f.h);
       } else {
-        B.add(new THREE.PlaneGeometry(g.sx, g.sz), roofM, { x: g.cx, y: podH + 0.02, z: g.cz }, 0, undefined, new THREE.Euler(-Math.PI / 2, 0, 0));
+        const top = mass(g.cx, g.cz, g.sx, g.sz, CURB_H, Math.max(f.h, podH), kind, id, { shopSides: [f.side] });
+        rooftop(g.cx, g.cz, g.sx, g.sz, top, kind, f.h);
       }
       colliders.addBox(g.cx, g.cz, g.sx, g.sz, 'building', f.h);
       footprints.push({ x: g.cx, z: g.cz, w: g.sx, d: g.sz, h: f.h, district, feature: f.zone });
-      if (f.h > 70) {
-        B.add(new THREE.CylinderGeometry(0.15, 0.25, 12, 6), mat('antenna', { color: '#b8bcc2', metalness: 0.8, roughness: 0.3 }), { x: g.cx, y: f.h + 6, z: g.cz });
-        B.add(new THREE.SphereGeometry(0.35, 8, 6), glowMat('#ff2020', 4), { x: g.cx, y: f.h + 12.2, z: g.cz });
-      }
+      void facadeMat;
     }
     // storefront on the street side
     const FRONTS = { n: [0, -1], s: [0, 1], w: [-1, 0], e: [1, 0] } as const;
@@ -251,12 +390,16 @@ export function buildCity(): CityBuild {
     const fdepth = f.side === 'n' || f.side === 's' ? g.sz : g.sx;
     const faceC = new THREE.Vector3(g.cx, 0, g.cz).addScaledVector(front, fdepth / 2 + 0.05);
     const rotY = Math.atan2(front.x, front.z);
-    const shopGlass = glowMatNight('#ffe7c2', 0.9);
-    B.add(new THREE.BoxGeometry(fw * 0.8, 3.6, 0.1), shopGlass, { x: faceC.x, y: CURB_H + 1.95, z: faceC.z }, rotY);
-    // door frame
+    // entrance: aluminium frame, glass double doors, accent light strip (glazing comes from the facade shader)
     const doorC = faceC.clone().addScaledVector(front, 0.08);
-    B.add(new THREE.BoxGeometry(2.6, 3.2, 0.15), mat('doorframe', { color: '#1a1c20', metalness: 0.6, roughness: 0.3 }), { x: doorC.x, y: CURB_H + 1.6, z: doorC.z }, rotY);
-    B.add(new THREE.BoxGeometry(2.2, 2.9, 0.16), glowMatNight(accent, 1.6), { x: doorC.x, y: CURB_H + 1.45, z: doorC.z }, rotY);
+    const frameM = mat('doorframe', { color: '#2a2c30', metalness: 0.8, roughness: 0.32 });
+    B.add(new THREE.BoxGeometry(2.7, 3.25, 0.18), frameM, { x: doorC.x, y: CURB_H + 1.62, z: doorC.z }, rotY);
+    B.add(new THREE.BoxGeometry(2.3, 2.95, 0.2), mat('doorglass', { color: '#0b0f14', metalness: 0.7, roughness: 0.04 }), { x: doorC.x, y: CURB_H + 1.48, z: doorC.z }, rotY);
+    B.add(new THREE.BoxGeometry(0.05, 2.95, 0.22), frameM, { x: doorC.x, y: CURB_H + 1.48, z: doorC.z }, rotY);
+    for (const sx of [-0.25, 0.25]) B.add(new THREE.BoxGeometry(0.04, 0.6, 0.06), mat('chromehandle', { color: '#d8dce0', metalness: 1, roughness: 0.15 }), { x: doorC.x + along.x * sx + front.x * 0.13, y: CURB_H + 1.3, z: doorC.z + along.z * sx + front.z * 0.13 }, rotY);
+    B.add(new THREE.BoxGeometry(2.7, 0.08, 0.24), glowMatNight(accent, 3), { x: doorC.x, y: CURB_H + 3.28, z: doorC.z }, rotY);
+    // entrance mat
+    B.add(new THREE.BoxGeometry(2.2, 0.02, 1.3), mat('doormat', { color: '#24221f', roughness: 1 }), { x: doorC.x + front.x * 0.8, y: CURB_H + 0.01, z: doorC.z + front.z * 0.8 }, rotY);
     // awning
     B.add(new THREE.BoxGeometry(fw * 0.85, 0.15, 2.2), mat('awning_' + accent, { color: accent, roughness: 0.6 }), { x: faceC.x + front.x * 1.1, y: CURB_H + 4.3, z: faceC.z + front.z * 1.1 }, rotY);
     // sign (emissive canvas)
@@ -342,21 +485,22 @@ export function buildCity(): CityBuild {
       const x = bx + 8 + R2() * (BLOCK - 16), z = bz + 8 + R2() * (BLOCK - 16);
       if (Math.abs(x - cx) < 9 && Math.abs(z - cz) < 9) continue;
       if (Math.abs(x - cx) < 3.5 || Math.abs(z - cz) < 3.5) continue;
-      tree(x, z, 1.2 + R2() * 0.6);
+      tree(x, z, 1.2 + R2() * 0.6, 'park');
     }
     for (const [x, z, r] of [[cx - 10, cz - 4, Math.PI / 2], [cx + 10, cz + 4, -Math.PI / 2], [cx - 4, cz + 10, Math.PI], [cx + 4, cz - 10, 0], [cx - 10, cz + 4, Math.PI / 2], [cx + 10, cz - 4, -Math.PI / 2]]) bench(x, z, r);
   }
 
   // ---------------- props ----------------
-  function tree(x: number, z: number, s = 1) {
-    const trunk = mat('trunk', { color: '#5a4030', roughness: 1 });
-    const leafs = [mat('leaf1', { color: '#3f6f2f', roughness: 0.95 }), mat('leaf2', { color: '#4f7f35', roughness: 0.95 }), mat('leaf3', { color: '#355f2a', roughness: 0.95 })];
-    B.add(new THREE.CylinderGeometry(0.12 * s, 0.2 * s, 3 * s, 7), trunk, { x, y: CURB_H + 1.5 * s, z });
-    const lm = leafs[Math.floor(R() * 3)];
-    const ico = new THREE.IcosahedronGeometry(1.5 * s, 1);
-    B.add(ico, lm, { x, y: CURB_H + 3.6 * s, z }, R() * 3, { x: 1, y: 0.9, z: 1 });
-    B.add(ico, lm, { x: x + 0.7 * s, y: CURB_H + 3.0 * s, z: z + 0.3 * s }, R() * 3, { x: 0.7, y: 0.65, z: 0.7 });
-    B.add(ico, lm, { x: x - 0.6 * s, y: CURB_H + 3.1 * s, z: z - 0.4 * s }, R() * 3, { x: 0.7, y: 0.7, z: 0.7 });
+  /** Real trees are grown and instanced later (world/trees.ts); here we record the spot and add the tree pit. */
+  function tree(x: number, z: number, s = 1, kind: 'street' | 'park' = 'street') {
+    trees.push({ x, y: CURB_H, z, s: kind === 'park' ? s * 0.85 : 1, kind });
+    if (kind === 'street') {
+      B.add(new THREE.BoxGeometry(1.5, 0.02, 1.5), pitM, { x, y: CURB_H + 0.005, z });
+      B.add(new THREE.BoxGeometry(1.55, 0.06, 0.06), pitEdge, { x, y: CURB_H + 0.02, z: z - 0.76 });
+      B.add(new THREE.BoxGeometry(1.55, 0.06, 0.06), pitEdge, { x, y: CURB_H + 0.02, z: z + 0.76 });
+      B.add(new THREE.BoxGeometry(0.06, 0.06, 1.55), pitEdge, { x: x - 0.76, y: CURB_H + 0.02, z });
+      B.add(new THREE.BoxGeometry(0.06, 0.06, 1.55), pitEdge, { x: x + 0.76, y: CURB_H + 0.02, z });
+    }
     colliders.addBox(x, z, 0.5, 0.5, 'tree', 3);
   }
   function bench(x: number, z: number, rot: number) {
@@ -483,17 +627,15 @@ export function buildCity(): CityBuild {
 
   // ---------------- parked cars ----------------
   const parkModels = ['pico', 'ledger', 'ampere', 'bastion', 'ledger', 'pico'];
-  const paints = ['#c8d1d8', '#111114', '#2d3a55', '#8c2f39', '#f2f2f2', '#2f3b2f'];
+  const paints = ['#c8d1d8', '#111114', '#2d3a55', '#8c2f39', '#f2f2f2', '#3d4247', '#7d8287', '#1c2a3f', '#d9d4c7'];
   let pc = 0;
   for (const rx of ROAD_X.slice(1, -1)) for (let j = 0; j < ROWS; j++) {
     if (R() < 0.45) continue;
     const z = ROAD_Z[j] + 20 + R() * 50;
     const side = R() < 0.5 ? -1 : 1;
     if (nearDoor(rx + side * 7, z, 6)) continue;
-    const v = buildVehicle(parkModels[pc % parkModels.length], paints[pc++ % paints.length]);
-    v.root.position.set(rx + side * 6.6, 0, z);
-    v.root.rotation.y = side < 0 ? 0 : Math.PI;
-    B.addObject(v.root);
+    // created once the car model has loaded (see populateParked)
+    parked.push({ model: parkModels[pc % parkModels.length], color: paints[pc++ % paints.length], x: rx + side * 6.6, z, rot: side < 0 ? 0 : Math.PI });
     colliders.addBox(rx + side * 6.6, z, 2, 4.6, 'parked', 1.5);
   }
 
@@ -542,7 +684,16 @@ export function buildCity(): CityBuild {
   };
 
   void artTexture;
-  return { group, colliders, doors, lamps, benches, nightMats, signals, screens, groundAt, footprints, ocean: coast.ocean };
+  return { group, colliders, doors, lamps, benches, nightMats, signals, screens, groundAt, footprints, ocean: coast.ocean, trees,
+    populateParked: () => {
+      for (const p of parked) {
+        const v = buildVehicle(p.model, p.color);
+        v.root.position.set(p.x, 0, p.z);
+        v.root.rotation.y = p.rot;
+        if (v.root.children.some((c) => (c as THREE.Mesh).isMesh)) { B.addObject(v.root); B.flush(group); } else group.add(v.root);
+      }
+    },
+  };
 
   function buildCoast() {
     const BW0 = maxZ, BW1 = maxZ + 9; // boardwalk

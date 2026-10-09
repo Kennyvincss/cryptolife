@@ -32,7 +32,10 @@ export const store = {
   projects: [] as ProjectRecord[],
 };
 
+/** Debug/photo-mode override of the time of day (minutes), or null for the shared clock. */
+export const timeOverride = { minutes: null as number | null };
 export function gameMinutes() {
+  if (timeOverride.minutes !== null) return timeOverride.minutes;
   return store.clock.minutes + (performance.now() - store.clock.at) / 1000;
 }
 export function clockString(m = gameMinutes()) {

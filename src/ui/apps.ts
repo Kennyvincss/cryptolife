@@ -478,7 +478,7 @@ const garage: App = {
 const settings: App = {
   id: 'settings', name: 'Settings', icon: '⚙', color: '#9aa3ad',
   render(el, rr) {
-    const q = (localStorage.getItem('cc_quality') ?? 'medium');
+    const q = (localStorage.getItem('cc_quality_v2') ?? (matchMedia('(pointer: coarse)').matches ? 'low' : 'high'));
     add(el, sub('Graphics'), h('div.seg', (['low', 'medium', 'high'] as const).map((k) => btn(k, () => { api.panel('quality', { q: k }); rr(); }, q === k ? 'on' : ''))),
       sub('Audio'), ...(['master', 'music', 'sfx', 'amb'] as const).map((k) => h('label.field', h('span', { master: 'Master', music: 'Music', sfx: 'Effects', amb: 'City ambience' }[k]), h('input', { type: 'range', min: 0, max: 1, step: 0.05, value: audio.volumes[k], oninput: (e: Event) => { audio.volumes[k] = Number((e.target as HTMLInputElement).value); audio.applyVolumes(); } }))),
       sub('Controls'), h('pre.keys', 'WASD move · Shift run · Space jump/handbrake\nMouse look (click to lock) · Wheel zoom\nE / R interact · F enter/exit vehicle\nP phone · M map · T chat · H help · Esc close\nC camera reset · 1-4 emotes (wave, dance, phone, talk)'),

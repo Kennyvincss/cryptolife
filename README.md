@@ -57,7 +57,12 @@ Create an account on the sign-in screen, design your character, pick a career fo
 
 ## What's in the playable build
 
-### World and graphics (three.js; procedural world plus credited third-party character assets)
+### World and graphics (three.js; procedural world plus credited third-party assets)
+- **Rendering on laptops and desktops ("High"):** an HDR pipeline with 4× MSAA, GTAO ambient occlusion, bloom, AgX filmic tone mapping and a colour grade (contrast, split toning, vignette, grain). Image-based lighting comes from real photographed HDR skies (day, golden hour and night), rotated to match the moving sun. There's a procedural cloud layer, exponential fog, and a 4096 shadow map snapped to texels so shadows don't shimmer. An FPS governor steps quality down automatically if a machine can't hold about 30 fps.
+- **Surfaces:** generated PBR texture sets (albedo, normal, AO, roughness) with world-aligned mapping and macro variation, so tiling isn't visible. Asphalt darkens and turns glossy in the rain, and road paint is chipped and faded.
+- **Buildings:** a facade shader lays out floors and window bays. Windows have recessed reveals, frames and mullions, sills and lintels, Fresnel glass reflections and **interior mapping** (a 3D room behind every window, with furniture, lamps and blinds; dim by day, randomly lit at night). There are storefronts with stocked shelves, floor-slab bands and grime. The geometry adds cornices, parapets, setback towers, rooftop HVAC, water tanks, antennas, window AC units, balconies, fire escapes and awnings.
+- **Trees:** grown with ez-tree (real bark and leaf textures) and drawn as instanced meshes with wind sway.
+- **Cars:** a CC0 glTF concept car with clearcoat paint and glass, drawn for every vehicle by one instanced fleet renderer (~40 draw calls for all cars). Paint, rims, head and brake lights are set per car.
 - **Crypto City** is a 5×4 block grid with 8 districts: Trading, Builder, DeFi, Social & Entertainment, Creator, Residential, Automotive, Convention, plus Hash Park.
 - **28 enterable venues**, each with its own interior and real activities, plus 3 home layouts (small, medium and large).
 - Textured roads with lane markings and crosswalks, raised sidewalks and curbs, generated building facades with lit windows at night, rooftop details, street lamps (the nearest ones cast real light at night), trees, benches, hydrants, working traffic signals and parked cars. Billboards carry original ads, one shows the live *simulated* price ticker, and a distant skyline and hills sit at the edge of the map.
@@ -147,7 +152,7 @@ src/
 | Real wallet / deposits / withdrawals | **Not implemented.** The wallet is simulated and labelled as such, and the Deposit/Withdraw buttons say so. | Integrate a reputable embedded-wallet provider server-side behind the existing `wallet.*` actions. Keep keys in the provider and never in the client. Add limits, recovery and fraud review. |
 | Real trading / DEX | **Not implemented.** Only the simulated market exists. | Add a separate "real market" module that uses an authorized trading API. It must never be mixed with simulated balances. |
 | Licensed music | Not integrated. All 18 tracks are original and generated in code (royalty-free). | `MusicSource` in `src/audio/music.ts` is the seam for a licensed catalog SDK. Shared playback in venues must follow that service's licensing rules. |
-| AAA graphics | Characters are rigged and use mocap, but there are only 2 base bodies (outfit *shapes* don't change, only colours). Buildings, cars and props are still procedural. There's no planar water reflection, swimming or boats. | More bodies and outfits (any Mixamo-rigged glTF works with the retargeter), glTF cars and props, and planar reflections on high quality. |
+| AAA graphics | There's a cinematic HDR pipeline and realistic buildings, trees and cars, but it is still a browser game rather than GTA V. There is only **one car model** (re-proportioned per body style and recoloured) and 2 character bodies. Buildings are generated (their facade detail and interiors come from a shader, not modelled geometry). Street furniture is simple. Trees use about 1.3M triangles. On weak laptops the FPS governor drops quality. | More licensed car, character and prop models (the instanced car renderer and rig retargeter accept any glTF), hand-modelled landmark buildings, and a texture-streaming and LOD system. |
 | Anti-cheat | Economic outcomes are server-side, **but zone proximity trusts the position the client reports**. | Server-side movement validation (speed checks, interpolation) and authoritative physics for vehicles. |
 | Multiplayer scale | One Node process holds the world in memory. It works for a handful to dozens of players. Presence is broadcast at 10 Hz. | Shard by district or instance, move persistence to a database (Postgres/Redis), and add interest management. |
 | Vehicle damage | Shown as a condition percentage, which affects resale value and ride ratings. There's no visual deformation. | Damage decals and deformable panels. |
@@ -166,6 +171,11 @@ All other art and audio are generated in code. These files in `public/assets/` c
 | `chars/female.glb` | three.js examples (`Michelle.glb`), Mixamo character | Mixamo/Adobe terms (royalty-free in projects). Animations stripped, quantized. |
 | `chars/anim_soldier.glb`, `chars/anim_xbot.glb`, `chars/anim_samba.glb` | three.js examples (`Soldier.glb`, `Xbot.glb`, `Michelle.glb`) and Mixamo motion capture | Mixamo/Adobe terms. Meshes stripped, so these hold the skeleton and animation only. |
 | `tex/waternormals.jpg` | three.js examples | MIT (three.js) |
+| `hdri/pedestrian_overpass_1k.hdr`, `hdri/venice_sunset_1k.hdr` | Poly Haven, via the three.js examples | CC0 |
+| `hdri/night.exr` | Poly Haven, via `@pmndrs/assets` | CC0 |
+| `cars/concept_lod.glb` | Khronos glTF-Sample-Assets "CarConcept" (from a public-domain model by Unity Fan) | CC0. Interior parts removed, decimated and textures downsized for real-time use. |
+| `src/vendor/ez-tree/` (tree generator plus its bark and leaf textures) | Daniel Greenheck, `@dgreenheck/ez-tree` 1.1.0 | MIT (license file included) |
+| `tex/*_albedo/_normal/_orm.jpg` (asphalt, sidewalk, concrete, brick, plaster, stone, metal, roof, grass) | Generated by this project with `tools/gen_textures.py` | Original |
 
 Before a commercial release, re-verify these terms or replace the files with assets you've commissioned or licensed.
 

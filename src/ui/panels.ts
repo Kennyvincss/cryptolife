@@ -449,7 +449,7 @@ const piano: Panel = {
   onClose() { api.stand(); },
 };
 
-const quality: Panel = { title: 'Graphics', render(el, _rr, d) { api.setQuality(d.q); add(el, h('p', `Graphics quality set to ${d.q}.`)); setTimeout(() => api.closePanel(), 600); } };
+const quality: Panel = { title: 'Graphics', render(el, _rr, d) { localStorage.setItem('cc_quality_manual', '1'); api.setQuality(d.q); add(el, h('p', `Graphics quality set to ${d.q}.`)); setTimeout(() => api.closePanel(), 600); } };
 
 export const PANELS: Record<string, Panel> = {
   menu, pool, piano, boutique, wardrobe, mirror, furniture, decorate, realestate, dealer, sellcar, customs, transport, callcar, work, pitch, defi, vip, react, computer, arcade, quality,

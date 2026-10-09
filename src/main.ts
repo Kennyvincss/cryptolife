@@ -13,9 +13,10 @@ import { Renderer } from './engine/renderer.js';
 import { Environment } from './engine/sky.js';
 import { Humanoid, randomLook, type Anim } from './entities/humanoid.js';
 import { loadRigs } from './entities/rig.js';
+import { fleet, loadCarModel } from './entities/carmodel.js';
 import { Car } from './entities/vehicle.js';
 import { act, connect, detectMode, sendPos, tokenKey } from './net/client.js';
-import { emit, gameMinutes, on, store } from './state.js';
+import { emit, gameMinutes, on, store, timeOverride } from './state.js';
 import { PlayerController } from './systems/controller.js';
 import { Interactions } from './systems/interact.js';
 import { RemotePlayers } from './systems/remote.js';
@@ -25,6 +26,9 @@ import { HUD } from './ui/hud.js';
 import { characterCreator, loginScreen } from './ui/login.js';
 import { buildBaseMap, route } from './ui/map.js';
 import { buildCity, type CityBuild } from './world/city.js';
+import { setFacadeNight } from './world/facade.js';
+import { Forest } from './world/trees.js';
+import { surfaceUniforms } from './world/pbr.js';
 import { foodItem } from './world/furniture.js';
 import { buildInterior, type HomeData, type InteriorBuild } from './world/interiors.js';
 
@@ -40,16 +44,27 @@ const loading = document.getElementById('loading');
 const setLoading = (t: string) => { const el = document.getElementById('loading-text'); if (el) el.textContent = t; };
 
 setLoading('Building Crypto City…');
-const city: CityBuild = buildCity();
+const city: CityBuild = buildCity(R.quality === 'low');
 scene.add(city.group);
+const forest = new Forest();
+forest.build(city.trees, { shadows: R.quality !== 'low', low: R.quality === 'low' });
+city.group.add(forest.group);
 buildBaseMap(city);
-const traffic = new Traffic(R.quality === 'low' ? 12 : 22);
-scene.add(traffic.group);
-const peds = new Pedestrians(R.quality === 'low' ? 16 : 30);
-scene.add(peds.group);
+// traffic, pedestrians and parked cars are created once the character rigs and car model load
+let traffic!: Traffic;
+let peds!: Pedestrians;
+scene.add(fleet.group);
+function populate() {
+  traffic = new Traffic(R.quality === 'low' ? 12 : 22);
+  scene.add(traffic.group);
+  peds = new Pedestrians(R.quality === 'low' ? 16 : 30);
+  scene.add(peds.group);
+  city.populateParked();
+}
 const remotes = new RemotePlayers();
 scene.add(remotes.group);
 env.setShadowSize(R.quality === 'high' ? 4096 : 2048);
+env.setShadowExtent(R.quality === 'high' ? 90 : 70);
 
 // light pool (fixed count avoids shader recompiles when switching zones)
 const pool: THREE.PointLight[] = [];
@@ -220,7 +235,7 @@ Object.assign(api, {
     pendingTest = model;
     exitBuilding();
   },
-  setQuality: (q: 'low' | 'medium' | 'high') => { R.setQuality(q); env.setShadowSize(q === 'high' ? 4096 : 2048); },
+  setQuality: (q: 'low' | 'medium' | 'high') => { R.setQuality(q); env.setShadowSize(q === 'high' ? 4096 : 2048); env.setShadowExtent(q === 'high' ? 90 : 70); },
   placeAt: (p: THREE.Vector3, heading: number) => { player.stand(); player.teleport(p.clone().setY(0), heading); },
   teleportLocal: (x: number, z: number, y = 0) => { if (interior) player.teleport(new THREE.Vector3(3000 + x, y, z), Math.PI); },
 });
@@ -244,7 +259,7 @@ async function refreshCityLists() {
 // ------------------------------------------------------------------ boot
 async function boot() {
   setLoading('Connecting…');
-  const rigs = loadRigs(); // characters + mocap stream in while we connect / log in
+  const rigs = Promise.all([loadRigs(), loadCarModel()]); // characters, mocap and cars stream in while we connect / log in
   await detectMode();
   loading?.classList.add('hidden');
   let token = localStorage.getItem(tokenKey());
@@ -261,6 +276,7 @@ async function boot() {
   setLoading('Loading characters…');
   loading?.classList.remove('hidden');
   await rigs;
+  populate();
   loading?.classList.add('hidden');
   if (isNew) {
     const r = await characterCreator(me.look, me.career);
@@ -316,10 +332,10 @@ function start() {
   requestAnimationFrame(loop);
   // debug handle (used by automated browser checks)
   (window as any).cc = {
-    player, scene, R, env, city, store, hud, interact,
+    player, scene, R, env, city, store, hud, interact, fleet, get traffic() { return traffic; }, get peds() { return peds; },
     get interior() { return interior; }, get zone() { return zone; },
     tp(z: string) { const d = city.doors.find((x) => x.zone === z); if (d) player.teleport(d.pos.clone().add(new THREE.Vector3(Math.sin(d.facing) * 2, 0, Math.cos(d.facing) * 2)), d.facing + Math.PI); },
-    time(m: number) { store.clock = { minutes: m, day: store.clock.day, at: performance.now() }; },
+    time(m: number | null) { timeOverride.minutes = m; },
     enter: (z: string) => enterZone(z),
   };
 }
@@ -468,8 +484,27 @@ let posTimer = 0;
 let screenTimer = 0;
 let t = 0;
 let lastRide = '';
+// FPS governor: if the machine can't hold ~30 fps, step quality down once per level
+// (only when the player hasn't chosen a quality themselves).
+const gov = { frames: 0, time: 0, settle: 6, manual: localStorage.getItem('cc_quality_manual') === '1' };
+function governor(rawDt: number) {
+  if (gov.manual || zone !== 'street' || document.hidden) { gov.frames = 0; gov.time = 0; return; }
+  if (gov.settle > 0) { gov.settle -= rawDt; return; }
+  gov.frames++; gov.time += rawDt;
+  if (gov.time < 4) return;
+  const fps = gov.frames / gov.time;
+  gov.frames = 0; gov.time = 0;
+  if (fps < 27 && R.quality !== 'low') {
+    const next = R.quality === 'high' ? 'medium' : 'low';
+    api.setQuality(next);
+    gov.settle = 4;
+    toast(`Graphics lowered to ${next} to keep the game smooth (${Math.round(fps)} fps). Change it in Phone → Settings.`, 'ok');
+  }
+}
+
 function loop(now: number) {
   requestAnimationFrame(loop);
+  governor(Math.min(0.5, (now - last) / 1000));
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
   t += dt;
@@ -552,9 +587,13 @@ function loop(now: number) {
   const focus = player.mode === 'drive' && player.car ? player.car.pos : player.pos;
   const night = env.update(gm, focus, R.camera.position, dt);
   if (zone === 'street') city.ocean.update(now / 1000);
+  setFacadeNight(night);
+  forest.update(now / 1000, R.camera.position, R.quality === 'low' ? 220 : 380);
+  surfaceUniforms.uWet.value += ((env.weather === 'rain' ? 1 : 0) - surfaceUniforms.uWet.value) * Math.min(1, dt * 0.05);
   for (const nm of city.nightMats) nm.m.emissiveIntensity = nm.base + (nm.night - nm.base) * night;
-  if (zone === 'street') { R.bloom.strength = 0.08 + night * 0.6; R.bloom.threshold = 0.98 - night * 0.18; }
-  else { R.bloom.strength = zone === 'club' ? 0.7 : 0.18; R.bloom.threshold = zone === 'club' ? 0.7 : 0.95; R.renderer.toneMappingExposure = 0.8; }
+  // bloom works on linear HDR values: thresholds sit above lit surfaces so only lights and glints glow
+  if (zone === 'street') { R.bloom.strength = 0.18 + night * 0.35; R.bloom.threshold = 2.2 - night * 1.2; R.bloom.radius = 0.5; }
+  else { R.bloom.strength = zone === 'club' ? 0.55 : 0.2; R.bloom.threshold = zone === 'club' ? 1.2 : 2.5; R.bloom.radius = 0.45; }
   const ph = signalPhase(t);
   for (const axis of ['ns', 'ew'] as const) for (const k of ['r', 'y', 'g'] as const) city.signals[axis][k].emissiveIntensity = ph[axis] === k ? 4 : 0.05;
   if (zone === 'street') {
@@ -642,6 +681,7 @@ function loop(now: number) {
   hud.frame(marks, player.camYaw, zone, zone.startsWith('home:') ? (zone === 'home:' + me.id ? 'Home' : 'A friend’s home') : zoneName(zone));
   remotes.sync(store.presence);
 
+  fleet.update(R.camera.position, R.quality === 'low' ? 160 : 260);
   R.render();
   input.endFrame();
 }
