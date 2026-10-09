@@ -190,7 +190,7 @@ export function buildVehicle(model: string, color: string, rims = 'steel'): Vehi
   }
   mergeStatic(root, new Set(wheels.map((w) => w.holder)));
   root.traverse((o) => { if ((o as THREE.Mesh).isMesh) { (o as THREE.Mesh).castShadow = true; } });
-  return { root, wheels, brake, head, seat: new THREE.Vector3(-0.4, d.seatY, d.seatZ - 0.15), dims: { L: d.L, W: d.W, wheelR: d.wheelR, wheelbase: d.wheelbase }, isMoto: false };
+  return { root, wheels, brake, head, seat: new THREE.Vector3(-0.4, d.seatY - 0.16, d.seatZ - 0.15), dims: { L: d.L, W: d.W, wheelR: d.wheelR, wheelbase: d.wheelbase }, isMoto: false };
 }
 
 function buildMoto(color: string, rims: string, scooter: boolean): VehicleVisual {

@@ -479,7 +479,7 @@ export class Humanoid {
         lH.x = rH.x = -1.5; lK.x = rK.x = 1.45;
         lH.z = 0.06; rH.z = -0.06;
         hipsY = 0;
-        if (anim === 'drive') { lS.x = rS.x = -1.0; lE.x = rE.x = -0.5; lS.z = 0.15; rS.z = -0.15; spine.x = -0.05; }
+        if (anim === 'drive') { lS.x = rS.x = -1.15; lE.x = rE.x = -0.35; lS.z = 0.15; rS.z = -0.15; spine.x = -0.32; neck.x = 0.25; lH.x = rH.x = -1.25; lK.x = rK.x = 1.0; }
         else if (anim === 'ride') { lS.x = rS.x = -0.9; lE.x = rE.x = -0.3; spine.x = 0.35; lH.x = rH.x = -1.1; lK.x = rK.x = 1.6; lH.z = 0.25; rH.z = -0.25; }
         else if (anim === 'type') { lS.x = rS.x = -0.5; lE.x = rE.x = -1.0; const tt = Math.sin(this.phase * 18); lE.z = tt * 0.04; rE.z = -tt * 0.04; neck.x = 0.15; }
         else if (anim === 'eat') { const e = (Math.sin(this.phase * 1.6) + 1) / 2; rS.x = -0.6 - e * 0.6; rE.x = -1.2 - e * 0.9; lS.x = -0.3; lE.x = -0.8; neck.x = 0.12 - e * 0.15; }

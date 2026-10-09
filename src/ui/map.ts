@@ -118,14 +118,17 @@ export function drawFullMap(ctx: CanvasRenderingContext2D, W: number, H: number,
   ctx.drawImage(base, ox, oy, base.width * sc, base.height * sc);
   const P = (wx: number, wz: number) => [ox + (wx - minX) * SCALE * sc, oy + (wz - minZ) * SCALE * sc] as const;
   // district labels
-  ctx.font = 'bold 13px "Segoe UI", Arial'; ctx.textAlign = 'center';
+  ctx.font = 'bold 11px "Segoe UI", Arial'; ctx.textAlign = 'center';
   const done = new Set<string>();
   for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
     const d = BLOCK_DISTRICT[r][c];
     if (done.has(d)) continue; done.add(d);
     const [bx, bz] = blockOrigin(c, r);
-    const [a, b] = P(bx + BLOCK / 2, bz + 12);
-    ctx.fillStyle = DISTRICTS[d].color; ctx.fillText(DISTRICTS[d].name.toUpperCase(), a, b);
+    const [a, b] = P(bx + BLOCK / 2, bz + BLOCK / 2);
+    const label = DISTRICTS[d].name.toUpperCase().replace(' DISTRICT', '');
+    const tw = ctx.measureText(label).width + 10;
+    ctx.fillStyle = 'rgba(5,8,14,0.7)'; ctx.fillRect(a - tw / 2, b - 9, tw, 16);
+    ctx.fillStyle = DISTRICTS[d].color; ctx.fillText(label, a, b + 3);
   }
   if (marks.route && marks.route.length > 1) {
     ctx.strokeStyle = '#b46bff'; ctx.lineWidth = 4; ctx.beginPath();

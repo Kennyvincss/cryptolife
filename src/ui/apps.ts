@@ -239,8 +239,8 @@ const projects: App = {
   },
 };
 function projectDetail(el: HTMLElement, rr: () => void, ctx: AppCtx, id: string) {
-  const { data: p } = useData<ProjectRecord>('proj:' + id, () => act('project.get', { id }), 4000, rr);
-  if (!p) { add(el, h('p', 'Loading…')); return; }
+  const { data: p, err } = useData<ProjectRecord>('proj:' + id, () => act('project.get', { id }), 4000, rr);
+  if (!p) { add(el, btn('‹ Projects', () => ctx.open('projects'), 'ghost'), h('p', err ?? 'Loading…')); return; }
   const me = store.me!;
   const mine = p.founderId === me.id;
   const reload = () => { invalidate('proj:' + id); invalidate('projects'); rr(); };

@@ -27,6 +27,7 @@ export class PlayerController {
   private seatH = 0.45;
   onStand?: () => void;
   firstPerson = false;
+  camBounds: { minX: number; maxX: number; minZ: number; maxZ: number; maxY: number } | null = null;
 
   constructor(public body: Humanoid, public camera: THREE.PerspectiveCamera) {}
 
@@ -180,6 +181,17 @@ export class PlayerController {
     }
     const want = look.clone().addScaledVector(dir, d);
     if (want.y < 0.3) want.y = 0.3;
+    const b = this.camBounds;
+    if (b) {
+      // keep the camera inside the room: shorten the boom until it fits
+      for (let i = 0; i < 12 && (want.x < b.minX || want.x > b.maxX || want.z < b.minZ || want.z > b.maxZ || want.y > b.maxY); i++) {
+        d *= 0.8;
+        want.copy(look).addScaledVector(dir, d);
+      }
+      want.x = THREE.MathUtils.clamp(want.x, b.minX, b.maxX);
+      want.z = THREE.MathUtils.clamp(want.z, b.minZ, b.maxZ);
+      want.y = Math.min(want.y, b.maxY);
+    }
     const k = dt >= 1 ? 1 : 1 - Math.exp(-dt * 14);
     this.camPos.lerp(want, k);
     if (dt >= 1) this.camPos.copy(want);

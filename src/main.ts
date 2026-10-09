@@ -81,6 +81,7 @@ let npcPassenger: { h: Humanoid; rideId: string; boarded: boolean } | null = nul
 async function enterZone(z: string, home?: HomeData) {
   let data: any = null;
   if (!home) {
+    pushPresence();
     data = await act('zone.enter', { zone: z });
     z = data.zone;
     home = data.home;
@@ -97,10 +98,11 @@ async function enterZone(z: string, home?: HomeData) {
   if (myCar) myCar.root.visible = false;
   zone = z; store.zone = z;
   env.indoor = true;
+  player.camBounds = interior.bounds;
   player.teleport(interior.spawn, interior.spawnRot);
   for (let i = 0; i < pool.length; i++) {
     const L = interior.lights[i];
-    if (L) { pool[i].position.copy(L.pos); pool[i].color.setHex(L.color); pool[i].intensity = L.intensity; pool[i].distance = L.distance; }
+    if (L) { pool[i].position.copy(L.pos); pool[i].color.setHex(L.color); pool[i].intensity = L.intensity * 2.2; pool[i].distance = L.distance * 1.5; }
     else pool[i].intensity = 0;
   }
   if (interior.music) venueMusic.setStation(interior.music.station, interior.music.pos, interior.music.volume);
@@ -118,6 +120,7 @@ async function exitBuilding() {
   audio.sfx('door');
   player.stand();
   interior?.dispose(); interior = null;
+  player.camBounds = null;
   city.group.visible = true; traffic.group.visible = true; peds.group.visible = true;
   if (myCar) myCar.root.visible = true;
   zone = 'street'; store.zone = 'street';
@@ -291,7 +294,14 @@ function start() {
   hud.systemChat('Welcome to Crypto City. Press H for controls, P for your phone.');
   setInterval(() => { if (zone === 'convention' || zone === 'hackhouse') refreshCityLists(); }, 20000);
   requestAnimationFrame(loop);
-  (window as any).cc = { player, scene, R, env, city, get interior() { return interior; }, get zone() { return zone; } };
+  // debug handle (used by automated browser checks)
+  (window as any).cc = {
+    player, scene, R, env, city, store, hud,
+    get interior() { return interior; }, get zone() { return zone; },
+    tp(z: string) { const d = city.doors.find((x) => x.zone === z); if (d) player.teleport(d.pos.clone().add(new THREE.Vector3(Math.sin(d.facing) * 2, 0, Math.cos(d.facing) * 2)), d.facing + Math.PI); },
+    time(m: number) { store.clock = { minutes: m, day: store.clock.day, at: performance.now() }; },
+    enter: (z: string) => enterZone(z),
+  };
 }
 
 function doorPos() {
@@ -424,6 +434,14 @@ function updateRides(dt: number) {
   }
 }
 
+function pushPresence() {
+  const driving = player.mode === 'drive' && player.car;
+  const a = driving ? 'drive' : player.mode === 'passenger' ? 'sit' : player.mode === 'lying' ? 'sleep' : body.anim;
+  const p = driving ? player.car!.pos : player.pos;
+  sendPos([+p.x.toFixed(2), +p.y.toFixed(2), +p.z.toFixed(2)], +(driving ? player.car!.heading : player.heading).toFixed(3), a,
+    driving ? { model: player.car!.model, color: player.car!.color, rims: player.car!.rims } : null, music.shared());
+}
+
 // ------------------------------------------------------------------ main loop
 let last = performance.now();
 let posTimer = 0;
@@ -466,9 +484,9 @@ function loop(now: number) {
     if (player.mode === 'drive') { extra.push('F Exit vehicle'); fAction = () => { const c = player.car; leaveCar(); if (c && testCar?.car === c) { /* test car stays until timer */ } }; }
     else if (player.mode === 'walk' || player.mode === 'seated') {
       const r = store.me?.ride;
-      if (rideCar && r?.status === 'arrived' && rideCar.car.pos.distanceTo(player.pos) < 5) { extra.push('F Get in your CityRide'); fAction = () => run(act('ride.board')); }
-      else if (myCar && myCar.pos.distanceTo(player.pos) < 4) { extra.push(`F Drive ${VEHICLE_BY_ID[myCar.model].name}`); fAction = () => enterCar(myCar!); }
-      else if (testCar && testCar.car.pos.distanceTo(player.pos) < 4) { extra.push('F Test drive'); fAction = () => enterCar(testCar!.car); }
+      if (rideCar && r?.status === 'arrived' && rideCar.car.pos.distanceTo(player.pos) < 6.5) { extra.push('F Get in your CityRide'); fAction = () => run(act('ride.board')); }
+      else if (myCar && myCar.pos.distanceTo(player.pos) < 6.5) { extra.push(`F Drive ${VEHICLE_BY_ID[myCar.model].name}`); fAction = () => enterCar(myCar!); }
+      else if (testCar && testCar.car.pos.distanceTo(player.pos) < 6.5) { extra.push('F Test drive'); fAction = () => enterCar(testCar!.car); }
     }
   }
   const near = player.mode === 'walk' ? remotes.nearest(player.pos, zone, 2.6) : null;
@@ -514,8 +532,8 @@ function loop(now: number) {
   const focus = player.mode === 'drive' && player.car ? player.car.pos : player.pos;
   const night = env.update(gm, focus, R.camera.position, dt);
   for (const nm of city.nightMats) nm.m.emissiveIntensity = nm.base + (nm.night - nm.base) * night;
-  R.bloom.strength = 0.08 + night * 0.6;
-  R.bloom.threshold = 0.98 - night * 0.18;
+  if (zone === 'street') { R.bloom.strength = 0.08 + night * 0.6; R.bloom.threshold = 0.98 - night * 0.18; }
+  else { R.bloom.strength = zone === 'club' ? 0.7 : 0.18; R.bloom.threshold = zone === 'club' ? 0.7 : 0.95; R.renderer.toneMappingExposure = 0.8; }
   const ph = signalPhase(t);
   for (const axis of ['ns', 'ew'] as const) for (const k of ['r', 'y', 'g'] as const) city.signals[axis][k].emissiveIntensity = ph[axis] === k ? 4 : 0.05;
   if (zone === 'street') {
@@ -537,7 +555,10 @@ function loop(now: number) {
     headlight.position.set(c.pos.x + Math.sin(c.heading) * 2, 0.9, c.pos.z + Math.cos(c.heading) * 2);
     headlight.target.position.set(c.pos.x + Math.sin(c.heading) * 20, 0, c.pos.z + Math.cos(c.heading) * 20);
   } else headlight.intensity = 0;
-  if (interior) interior.update(dt, t, night);
+  if (interior) {
+    interior.update(dt, t, night);
+    for (const n of interior.npcs) n.showTag(n.root.position.distanceToSquared(player.pos.clone().sub(interior.group.position)) < 36);
+  }
   remotes.update(dt, zone);
   if (zone === 'street') updateRides(dt);
 
@@ -589,16 +610,8 @@ function loop(now: number) {
   if (shared?.mu) remoteMusic.setRemote(shared.mu.track, shared.mu.t0, new THREE.Vector3(...shared.p).setY(1.5)); else remoteMusic.setRemote(null);
   if (music.output === 'car' && player.mode !== 'drive') music.setOutput('headphones');
 
-  // network presence (10 Hz)
-  posTimer += dt;
-  if (posTimer > 0.1) {
-    posTimer = 0;
-    const driving = player.mode === 'drive' && player.car;
-    const a = driving ? 'drive' : player.mode === 'passenger' ? 'sit' : player.mode === 'lying' ? 'sleep' : body.anim;
-    const p = driving ? player.car!.pos : player.pos;
-    sendPos([+p.x.toFixed(2), +p.y.toFixed(2), +p.z.toFixed(2)], +(driving ? player.car!.heading : player.heading).toFixed(3), a,
-      driving ? { model: player.car!.model, color: player.car!.color, rims: player.car!.rims } : null, music.shared());
-  }
+  // network presence (10 Hz, wall-clock throttled so slow frame rates still report promptly)
+  if (now - posTimer > 100) { posTimer = now; pushPresence(); }
   if (body.anim === 'dance' && zone === 'club') { danceSecs += dt; if (danceSecs > 20) { act('activity.dance', { secs: danceSecs }).catch(() => {}); danceSecs = 0; } }
 
   // screens & HUD

@@ -28,6 +28,8 @@ export interface InteriorBuild {
   ambient: { sky: number; ground: number; intensity: number };
   update: (dt: number, t: number, night: number) => void;
   music: { station: string; pos: THREE.Vector3; volume: number } | null;
+  bounds: { minX: number; maxX: number; minZ: number; maxZ: number; maxY: number } | null;
+  npcs: Humanoid[];
   dispose(): void;
 }
 
@@ -48,6 +50,7 @@ class Kit {
   ambient = { sky: 0xfff4e6, ground: 0x3a3430, intensity: 0.55 };
   music: InteriorBuild['music'] = null;
   remove: (() => void)[] = [];
+  bounds: InteriorBuild['bounds'] = null;
 
   constructor(public zone: string) {
     this.group.position.copy(INTERIOR_ORIGIN);
@@ -123,6 +126,7 @@ class Kit {
 
   /** Box room; entrance is the gap in the +z wall at x=0. */
   room(w: number, d: number, h: number, floor: THREE.Material, wall: THREE.Material, ceil: THREE.Material = mat('ceil', { color: '#efeeea', roughness: 0.9 }), doorW = 2.4) {
+    this.bounds = { minX: INTERIOR_ORIGIN.x - w / 2 + 0.35, maxX: INTERIOR_ORIGIN.x + w / 2 - 0.35, minZ: INTERIOR_ORIGIN.z - d / 2 + 0.35, maxZ: INTERIOR_ORIGIN.z + d / 2 - 0.35, maxY: h - 0.25 };
     this.B.add(planeUV(w, d, 1, 1), floor, { x: 0, y: 0, z: 0 }, 0, undefined, new THREE.Euler(-Math.PI / 2, 0, 0));
     this.B.add(new THREE.PlaneGeometry(w, d), ceil, { x: 0, y: h, z: 0 }, 0, undefined, new THREE.Euler(Math.PI / 2, 0, 0));
     const t = 0.2;
@@ -175,7 +179,7 @@ class Kit {
     const self = this;
     return {
       zone: this.zone, group: this.group, colliders: this.colliders, spawn: this.spawn, spawnRot: this.spawnRot,
-      lights: this.lights, ambient: this.ambient, music: this.music,
+      lights: this.lights, ambient: this.ambient, music: this.music, bounds: this.bounds, npcs: this.npcs,
       update(dt, t, night) {
         for (const u of self.updaters) u(dt, t, night);
         screenT += dt;
@@ -636,9 +640,9 @@ function exchange(k: Kit, accent: string) {
     else { k.put(F.officeChair(), x + 0.8, z + 0.65, Math.PI); k.act(x + 0.8, z + 0.9, 'Trade at a desk', () => { api.sit(k.w(x + 0.8, z + 0.75), Math.PI, 'type', 0.5); api.panel('trade'); }, 1.2); }
   }
   // order terminals near entrance
-  for (const x of [-6, -2, 2, 6]) {
-    k.put(F.kiosk(), x, 7.5, Math.PI, 0, [0.6, 0.4], true);
-    k.act(x, 6.8, 'Trading terminal', () => api.panel('trade'), 1.4);
+  for (const [x, z] of [[-13, 4], [-13, 8], [13, 4]] as const) {
+    k.put(F.kiosk(), x, z, x < 0 ? Math.PI / 2 : -Math.PI / 2, 0, [0.6, 0.4], true);
+    k.act(x + (x < 0 ? 0.8 : -0.8), z, 'Trading terminal', () => api.panel('trade'), 1.4);
   }
   k.npc(10, 8, -Math.PI / 2, 'idle', 333, 'Exchange Concierge (NPC)');
   k.act(9, 8, 'Ask about the market', () => api.panel('news'), 1.6);
