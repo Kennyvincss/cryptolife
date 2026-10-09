@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { loadDb, saveDb } from './db.js';
 import { Game } from './game.js';
+import { nodeHasher } from './auth-node.js';
 import { GameError } from './util.js';
 import { register as regLife } from './actions/life.js';
 import { register as regFinance } from './actions/finance.js';
@@ -27,11 +28,19 @@ const game = new Game(db, {
     const s = JSON.stringify(msg);
     for (const ws of sockets.values()) if (ws.readyState === ws.OPEN) ws.send(s);
   },
-});
+}, nodeHasher);
 regLife(game); regFinance(game); regWork(game); regSocial(game); regTransport(game);
 
 const app = express();
 app.use(express.json({ limit: '64kb' }));
+// allow a client hosted elsewhere (e.g. a static Vercel deploy) to reach this server
+app.use((req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', process.env.CC_ALLOW_ORIGIN ?? '*');
+  res.setHeader('Access-Control-Allow-Headers', 'content-type');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+  if (req.method === 'OPTIONS') { res.sendStatus(204); return; }
+  next();
+});
 
 function wrap(fn: (body: any) => unknown) {
   return (req: express.Request, res: express.Response) => {
@@ -59,46 +68,14 @@ wss.on('connection', (ws, req) => {
   const prev = sockets.get(u.id);
   if (prev && prev !== ws) { prev.send(JSON.stringify({ t: 'error', error: 'Signed in from another tab' })); prev.close(); }
   sockets.set(u.id, ws);
-  game.presence.set(u.id, { p: [0, 0, 0], r: 0, a: 'idle', z: 'home:' + u.id, look: u.look, t: Date.now() });
-  u.lastZone = 'home:' + u.id;
-  u.lastActive = Date.now();
-  if (u.driver.onDuty) u.driver.onDuty = false;
-
-  ws.send(JSON.stringify({
-    t: 'init',
-    me: game.snapshot(u),
-    tokens: game.market.list(),
-    news: db.news.slice(0, 40),
-    clock: game.clock(),
-    trending: game.market.mods.trending,
-  }));
+  ws.send(JSON.stringify(game.onConnect(u)));
 
   ws.on('message', (raw) => {
     let msg: any;
     try { msg = JSON.parse(String(raw)); } catch { return; }
-    if (msg.t === 'pos') {
-      const p = game.presence.get(u.id);
-      if (!p) return;
-      const v = msg.p as Vec3;
-      if (Array.isArray(v) && v.length === 3 && v.every((n) => Number.isFinite(n))) p.p = [v[0], v[1], v[2]];
-      p.r = Number(msg.r) || 0;
-      p.a = String(msg.a ?? 'idle').slice(0, 16);
-      p.veh = msg.veh && typeof msg.veh === 'object' ? { model: String(msg.veh.model).slice(0, 16), color: String(msg.veh.color).slice(0, 9), rims: String(msg.veh.rims).slice(0, 8) } : undefined;
-      p.mu = msg.mu && Number.isFinite(msg.mu.track) ? { track: Number(msg.mu.track), t0: Number(msg.mu.t0) } : null;
-      p.look = u.look;
-      p.t = Date.now();
-      u.lastPos = p.p;
-      return;
-    }
-    if (msg.t === 'act') {
-      let reply: any;
-      try {
-        const d = game.handle(u, String(msg.a), msg.d);
-        reply = { t: 'res', id: msg.id, ok: true, d };
-      } catch (e) {
-        if (!(e instanceof GameError)) console.error('action error', msg.a, e);
-        reply = { t: 'res', id: msg.id, ok: false, e: e instanceof GameError ? e.message : 'Server error' };
-      }
+    if (msg.t === 'pos') game.onPos(u, msg);
+    else if (msg.t === 'act') {
+      const reply = game.onAct(u, msg);
       if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(reply));
     }
   });
@@ -106,9 +83,7 @@ wss.on('connection', (ws, req) => {
   ws.on('close', () => {
     if (sockets.get(u.id) === ws) {
       sockets.delete(u.id);
-      game.presence.delete(u.id);
-      u.driver.onDuty = false;
-      u.lastActive = Date.now();
+      game.onDisconnect(u);
     }
   });
 });

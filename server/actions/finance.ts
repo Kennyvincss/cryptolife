@@ -2,7 +2,7 @@
 
 import { POOLS, TRADE_FEE } from '../../shared/catalog.js';
 import type { Order, OrderType } from '../../shared/types.js';
-import type { UserRec } from '../db.js';
+import type { UserRec } from '../db-core.js';
 import type { Game } from '../game.js';
 import { questHook } from '../quests.js';
 import { assert, round2, uid } from '../util.js';

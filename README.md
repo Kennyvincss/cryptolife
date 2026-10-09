@@ -27,6 +27,15 @@ Other scripts:
 | `npm test` | Server economy tests (trading, payments, zone gating, jobs, projects, DAOs, rides, reputation caps, vehicles) |
 | `npm run typecheck` | TypeScript check for client, server and shared code |
 
+### Deploying (e.g. Vercel) — online vs offline
+
+The client picks its mode automatically on load:
+
+- **Online (multiplayer):** a game server answers at `VITE_SERVER_URL` (or the same origin). Vercel only hosts static files and can't run the long-lived WebSocket server, so run `npm start` on a host that supports WebSockets (Render, Railway, Fly.io, a VPS…). Then set the Vercel environment variable `VITE_SERVER_URL=https://your-game-server.example.com` and redeploy. The server sends CORS headers for any origin; restrict them with `CC_ALLOW_ORIGIN=https://your-site.vercel.app`.
+- **Offline (single-player):** no server reachable. The same authoritative game engine runs inside the browser, the world is saved in `localStorage` on that device, and the sign-in screen says so. This is what a plain Vercel deploy gives you. You can force it with `?offline`.
+
+Phones and tablets get touch controls: a left stick to move and drive, drag on the right to look, tappable interaction prompts, and buttons for jump, run, phone, map, chat and emotes.
+
 Environment variables: `PORT` (default `8787`) and `CC_DATA_DIR` (where `db.json` is saved; default `server/data/`).
 
 Create an account on the sign-in screen, design your character, pick a career focus (you can change it later), and you wake up in your starter apartment with **$100 in simulated funds**.
@@ -142,7 +151,7 @@ src/
 | Multiplayer scale | One Node process holds the world in memory. It works for a handful to dozens of players. Presence is broadcast at 10 Hz. | Shard by district or instance, move persistence to a database (Postgres/Redis), and add interest management. |
 | Vehicle damage | Shown as a condition percentage, which affects resale value and ride ratings. There's no visual deformation. | Damage decals and deformable panels. |
 | Player passengers | A rider follows the player driver's car via presence; there's no shared physics. | Server-side vehicle simulation. |
-| Mobile | Desktop keyboard and mouse only. | Touch controls. |
+| Mobile | Touch controls are basic: stick, look-drag, buttons, tappable prompts. Phones default to low graphics quality. | Native-feeling controls and a performance pass for low-end GPUs. |
 
 ---
 

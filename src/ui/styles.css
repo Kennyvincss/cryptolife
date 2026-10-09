@@ -240,3 +240,42 @@ pre.keys, .help pre { font-family: Consolas, monospace; font-size: 12px; white-s
 .career small { display: block; color: var(--muted); font-size: 11px; }
 .career.on { border-color: var(--accent); background: rgba(56,242,165,0.1); }
 @media (max-width: 900px) { .creator { flex-direction: column; overflow-y: auto; } .cc-opts { width: auto; } .trade { grid-template-columns: 1fr; } .cols { grid-template-columns: 1fr; } }
+
+/* connection mode badge */
+.modebadge { border-radius: 10px; padding: 8px 10px; font-size: 12px; display: flex; flex-direction: column; gap: 2px; }
+.modebadge.local { background: rgba(255,176,63,0.1); border: 1px solid rgba(255,176,63,0.35); color: #ffd28a; }
+.modebadge.online { background: rgba(56,242,165,0.1); border: 1px solid rgba(56,242,165,0.35); color: var(--accent); }
+.modebadge small { color: var(--muted); }
+.prompt { pointer-events: auto; cursor: pointer; }
+
+/* touch controls */
+.joy { position: fixed; left: 24px; bottom: calc(28px + env(safe-area-inset-bottom)); width: 130px; height: 130px; border-radius: 50%; background: rgba(255,255,255,0.08); border: 2px solid rgba(255,255,255,0.2); z-index: 12; touch-action: none; }
+.joy-knob { position: absolute; left: 40px; top: 40px; width: 50px; height: 50px; border-radius: 50%; background: rgba(255,255,255,0.45); box-shadow: 0 2px 10px rgba(0,0,0,0.4); }
+.look-zone { position: fixed; right: 0; top: 0; width: 55vw; height: 100vh; z-index: 9; touch-action: none; }
+.tbar { position: fixed; left: 30px; bottom: calc(176px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 8px; z-index: 13; }
+.tpad { position: fixed; right: 18px; bottom: calc(150px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 10px; z-index: 12; }
+.tbtn { width: 48px; height: 48px; border-radius: 50%; border: 1px solid var(--line); background: var(--bg); color: #fff; font-size: 22px; touch-action: manipulation; }
+.tbtn.big { width: 64px; height: 64px; font-size: 28px; }
+.tbtn.on { border-color: var(--accent); background: rgba(56,242,165,0.25); }
+
+@media (max-width: 820px), (pointer: coarse) {
+  body.touch .hint { display: none; }
+  .tl { top: calc(8px + env(safe-area-inset-top)); left: 8px; transform: scale(0.8); transform-origin: top left; }
+  .tr { top: calc(8px + env(safe-area-inset-top)); right: 8px; transform: scale(0.8); transform-origin: top right; }
+  .bl { left: 8px; bottom: auto; top: calc(86px + env(safe-area-inset-top)); }
+  .minimap { width: 110px; height: 110px; }
+  .chat { width: 62vw; }
+  .chat-log { max-height: 80px; font-size: 11px; }
+  .br { right: 8px; bottom: calc(290px + env(safe-area-inset-bottom)); }
+  .prompt { padding: 10px 14px; font-size: 14px; }
+  .phone, .phone.open { right: 0; left: 0; width: 100%; height: 100%; border-radius: 0; border: none; }
+  .phone { bottom: -110%; }
+  .phone.open { bottom: 0; }
+  .ph-notch { display: none; }
+  .ph-status { padding-top: calc(10px + env(safe-area-inset-top)); }
+  .panel, .panel.wide { width: 100vw; max-height: 100vh; height: 100vh; border-radius: 0; }
+  .bigmap { padding: 6px; }
+  .login-card { width: 92vw; padding: 20px; }
+  .grid { grid-template-columns: 1fr 1fr; }
+  .hud-ride, .hud-wp { top: calc(70px + env(safe-area-inset-top)); font-size: 12px; max-width: 70vw; }
+}

@@ -1,6 +1,10 @@
-import crypto from 'node:crypto';
-
-export const uid = (p = '') => p + crypto.randomBytes(6).toString('hex');
+function hex(n: number) {
+  const b = new Uint8Array(n);
+  globalThis.crypto.getRandomValues(b);
+  return Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
+}
+export const uid = (p = '') => p + hex(6);
+export const randomHex = hex;
 export const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 export const round2 = (v: number) => Math.round(v * 100) / 100;
 export const pick = <T>(a: T[]): T => a[Math.floor(Math.random() * a.length)];
@@ -27,14 +31,9 @@ export function assert(cond: unknown, msg: string): asserts cond {
   if (!cond) fail(msg);
 }
 
-export function hashPassword(pw: string, salt = crypto.randomBytes(16).toString('hex')) {
-  const hash = crypto.scryptSync(pw, salt, 32).toString('hex');
-  return { hash, salt };
-}
-export function verifyPassword(pw: string, salt: string, hash: string) {
-  const h = crypto.scryptSync(pw, salt, 32);
-  const b = Buffer.from(hash, 'hex');
-  return b.length === h.length && crypto.timingSafeEqual(h, b);
+export interface PasswordHasher {
+  hash(pw: string): { hash: string; salt: string };
+  verify(pw: string, salt: string, hash: string): boolean;
 }
 
 // Normalize usernames to defeat look-alike impersonation (case, 0/o, 1/l/i, 5/s ...).

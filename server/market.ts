@@ -4,7 +4,7 @@
 import { TOKENS } from '../shared/catalog.js';
 import type { MarketToken, NewsItem } from '../shared/types.js';
 import { pick, randn, uid } from './util.js';
-import type { DB } from './db.js';
+import type { DB } from './db-core.js';
 
 export interface Candle { t: number; o: number; h: number; l: number; c: number }
 interface Effect { target: string; drift: number; start: number; until: number }

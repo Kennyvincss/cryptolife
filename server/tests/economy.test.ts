@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { emptyDb } from '../db.js';
 import { Game } from '../game.js';
+import { nodeHasher } from '../auth-node.js';
 import { register as regLife } from '../actions/life.js';
 import { register as regFinance, processOrders } from '../actions/finance.js';
 import { register as regWork, projectCycle } from '../actions/work.js';
@@ -12,7 +13,7 @@ import type { UserRec } from '../db.js';
 
 function setup() {
   const sent: { id: string; msg: any }[] = [];
-  const g = new Game(emptyDb(), { send: (id, msg) => sent.push({ id, msg }), broadcast: () => {} });
+  const g = new Game(emptyDb(), { send: (id, msg) => sent.push({ id, msg }), broadcast: () => {} }, nodeHasher);
   regLife(g); regFinance(g); regWork(g); regSocial(g); regTransport(g);
   const mk = (name: string) => {
     const { id } = g.register(name, 'password1');

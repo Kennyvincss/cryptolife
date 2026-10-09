@@ -6,7 +6,7 @@ import type { CityEvent, PresenceEntry } from '../shared/types.js';
 import { accrueStakes, processOrders } from './actions/finance.js';
 import { fleetCycle, offerNpcRides } from './actions/transport.js';
 import { projectCycle } from './actions/work.js';
-import type { DB } from './db.js';
+import type { DB } from './db-core.js';
 import { NPC_NAMES, type Game } from './game.js';
 import { settleQuests } from './quests.js';
 import { pick, round2, uid } from './util.js';

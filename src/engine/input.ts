@@ -23,7 +23,7 @@ export class Input {
     el.addEventListener('mousedown', (e) => {
       if (e.button === 0 || e.button === 2) {
         this.dragging = true;
-        if (this.enabled && !this.locked && e.button === 0) el.requestPointerLock?.();
+        if (this.enabled && !this.locked && e.button === 0 && !isTouchDevice()) el.requestPointerLock?.();
       }
     });
     window.addEventListener('mouseup', () => (this.dragging = false));
@@ -39,6 +39,13 @@ export class Input {
   pressed(code: string) { return this.enabled && !isTyping() && this.pressedThisFrame.has(code); }
   /** Pressed regardless of `enabled` (for global hotkeys like Escape / phone). */
   pressedAny(code: string) { return !isTyping() && this.pressedThisFrame.has(code); }
+  /** Virtual (touch) input. */
+  setVirtual(code: string, on: boolean) {
+    if (on) { if (!this.keys.has(code)) this.pressedThisFrame.add(code); this.keys.add(code); }
+    else this.keys.delete(code);
+  }
+  tap(code: string) { this.pressedThisFrame.add(code); }
+  addLook(dx: number, dy: number) { this.mouseDX += dx; this.mouseDY += dy; }
   endFrame() { this.pressedThisFrame.clear(); this.mouseDX = 0; this.mouseDY = 0; this.wheel = 0; }
   unlock() { if (this.locked) document.exitPointerLock?.(); }
 }
@@ -46,4 +53,8 @@ export class Input {
 export function isTyping() {
   const a = document.activeElement as HTMLElement | null;
   return !!a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.tagName === 'SELECT' || a.isContentEditable);
+}
+
+export function isTouchDevice() {
+  return matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
 }

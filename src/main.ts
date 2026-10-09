@@ -6,12 +6,13 @@ import type { Look } from '../shared/types.js';
 import { api } from './api.js';
 import { audio } from './audio/audio.js';
 import { music, remoteMusic, venueMusic } from './audio/music.js';
-import { Input } from './engine/input.js';
+import { Input, isTouchDevice } from './engine/input.js';
+import { mountTouch } from './ui/touch.js';
 import { Renderer } from './engine/renderer.js';
 import { Environment } from './engine/sky.js';
 import { Humanoid, randomLook, type Anim } from './entities/humanoid.js';
 import { Car } from './entities/vehicle.js';
-import { act, connect, sendPos } from './net/client.js';
+import { act, connect, detectMode, sendPos, tokenKey } from './net/client.js';
 import { emit, gameMinutes, on, store } from './state.js';
 import { PlayerController } from './systems/controller.js';
 import { Interactions } from './systems/interact.js';
@@ -239,14 +240,16 @@ async function refreshCityLists() {
 
 // ------------------------------------------------------------------ boot
 async function boot() {
+  setLoading('Connecting…');
+  await detectMode();
   loading?.classList.add('hidden');
-  let token = localStorage.getItem('cc_token');
+  let token = localStorage.getItem(tokenKey());
   let isNew = false;
   if (!token) ({ token, isNew } = await loginScreen());
   try {
     await connect(token!);
   } catch {
-    localStorage.removeItem('cc_token');
+    localStorage.removeItem(tokenKey());
     ({ token, isNew } = await loginScreen());
     await connect(token!);
   }
@@ -268,6 +271,11 @@ function start() {
   player.teleport(new THREE.Vector3(...PLAYER_SPAWN).setY(0.15), Math.PI / 2);
   hud = new HUD();
   hud.onMapClick = (x, z) => setWaypoint(x, z, 'Map marker');
+  hud.onPromptTap = (k) => (k === 'W' ? player.stand() : input.tap('Key' + k));
+  if (isTouchDevice()) {
+    mountTouch(input, { phone: () => hud.togglePhone(), map: () => hud.toggleMap(), chat: () => hud.openChat(), blocked: () => hud.panelOpen || hud.mapOpen || hud.phoneOpen || hud.chatOpen });
+    player.camDist = 6.5;
+  }
   hud.mapMarks = () => ({
     player: { x: zone === 'street' ? player.pos.x : doorPos().x, z: zone === 'street' ? player.pos.z : doorPos().z, heading: player.heading },
     waypoint, route: waypoint?.route,
@@ -291,7 +299,7 @@ function start() {
 
   // start at home
   enterZone('home:' + me.id).catch(() => {});
-  hud.systemChat('Welcome to Crypto City. Press H for controls, P for your phone.');
+  hud.systemChat(isTouchDevice() ? 'Welcome to Crypto City. Left stick to move, drag right side to look, tap the prompts to interact, 📱 for your phone.' : 'Welcome to Crypto City. Press H for controls, P for your phone.');
   setInterval(() => { if (zone === 'convention' || zone === 'hackhouse') refreshCityLists(); }, 20000);
   requestAnimationFrame(loop);
   // debug handle (used by automated browser checks)

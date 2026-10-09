@@ -5,7 +5,7 @@ import {
 } from '../../shared/catalog.js';
 import type { ChallengeKind, JobListing, ProjectRecord } from '../../shared/types.js';
 import { checkAnswer, makeChallenge } from '../challenges.js';
-import type { UserRec } from '../db.js';
+import type { UserRec } from '../db-core.js';
 import type { Game } from '../game.js';
 import { questHook } from '../quests.js';
 import { assert, clamp, pick, round2, uid } from '../util.js';

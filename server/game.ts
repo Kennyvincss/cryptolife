@@ -9,11 +9,11 @@ import { FEATURE_BY_ZONE, doorOf } from '../shared/city.js';
 import type {
   ChatMessage, Look, MeSnapshot, NewsItem, PresenceEntry, SkillId, TxRecord, Vec3,
 } from '../shared/types.js';
-import type { DB, UserRec } from './db.js';
+import type { DB, UserRec } from './db-core.js';
 import { Market } from './market.js';
 import type { PendingChallenge } from './challenges.js';
 import {
-  RESERVED, assert, cleanText, fail, hashPassword, normalizeName, pick, round2, uid, verifyPassword,
+  RESERVED, assert, cleanText, fail, normalizeName, pick, round2, uid, type PasswordHasher, GameError,
 } from './util.js';
 
 export type Handler = (u: UserRec, args: any, g: Game) => unknown;
@@ -43,7 +43,7 @@ export class Game {
   lastDayIndex: number;
   private rate = new Map<string, number[]>();
 
-  constructor(public db: DB, public io: IO) {
+  constructor(public db: DB, public io: IO, private hasher: PasswordHasher) {
     this.market = new Market(db, (n) => this.pushNews(n), (sym, haircut) => this.onExploit(sym, haircut));
     this.lastDayIndex = this.dayIndex();
     this.ensureJobs();
@@ -65,7 +65,7 @@ export class Game {
     const norm = normalizeName(username);
     assert(!RESERVED.some((r) => norm.includes(normalizeName(r))), 'That username is reserved');
     assert(!this.db.usernames[norm], 'That username (or a look-alike) is already taken');
-    const { hash, salt } = hashPassword(password);
+    const { hash, salt } = this.hasher.hash(password);
     const id = uid('u');
     const token = uid('t') + uid();
     const u: UserRec = {
@@ -95,7 +95,7 @@ export class Game {
   login(username: string, password: string) {
     const id = this.db.usernames[normalizeName(String(username ?? '').replace(/^@/, ''))];
     const u = id ? this.db.users[id] : undefined;
-    assert(u && u.username.toLowerCase() === String(username).replace(/^@/, '').toLowerCase() && verifyPassword(String(password), u.salt, u.passHash), 'Wrong username or password');
+    assert(u && u.username.toLowerCase() === String(username).replace(/^@/, '').toLowerCase() && this.hasher.verify(String(password), u.salt, u.passHash), 'Wrong username or password');
     const token = uid('t') + uid();
     u.sessions = [...u.sessions.slice(-4), token];
     return { token, id: u.id };
@@ -294,6 +294,41 @@ export class Game {
           this.pushMe(u);
         }
       }
+    }
+  }
+
+  // ---------------- connections (shared by the WebSocket server and the in-browser engine) ----------------
+  onConnect(u: UserRec) {
+    this.presence.set(u.id, { p: [0, 0, 0], r: 0, a: 'idle', z: 'home:' + u.id, look: u.look, t: Date.now() });
+    u.lastZone = 'home:' + u.id;
+    u.lastActive = Date.now();
+    u.driver.onDuty = false;
+    return { t: 'init', me: this.snapshot(u), tokens: this.market.list(), news: this.db.news.slice(0, 40), clock: this.clock(), trending: this.market.mods.trending };
+  }
+  onDisconnect(u: UserRec) {
+    this.presence.delete(u.id);
+    u.driver.onDuty = false;
+    u.lastActive = Date.now();
+  }
+  onPos(u: UserRec, msg: any) {
+    const p = this.presence.get(u.id);
+    if (!p) return;
+    const v = msg.p as Vec3;
+    if (Array.isArray(v) && v.length === 3 && v.every((n) => Number.isFinite(n))) p.p = [v[0], v[1], v[2]];
+    p.r = Number(msg.r) || 0;
+    p.a = String(msg.a ?? 'idle').slice(0, 16);
+    p.veh = msg.veh && typeof msg.veh === 'object' ? { model: String(msg.veh.model).slice(0, 16), color: String(msg.veh.color).slice(0, 9), rims: String(msg.veh.rims).slice(0, 8) } : undefined;
+    p.mu = msg.mu && Number.isFinite(msg.mu.track) ? { track: Number(msg.mu.track), t0: Number(msg.mu.t0) } : null;
+    p.look = u.look;
+    p.t = Date.now();
+    u.lastPos = p.p;
+  }
+  onAct(u: UserRec, msg: any) {
+    try {
+      return { t: 'res', id: msg.id, ok: true, d: this.handle(u, String(msg.a), msg.d) };
+    } catch (e) {
+      if (!(e instanceof GameError)) console.error('action error', msg.a, e);
+      return { t: 'res', id: msg.id, ok: false, e: e instanceof GameError ? e.message : 'Server error' };
     }
   }
 

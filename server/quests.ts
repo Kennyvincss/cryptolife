@@ -2,7 +2,7 @@
 // generate the underlying activity (trades, visits, votes, posts, stakes).
 
 import { QUESTS, type QuestTaskKind } from '../shared/catalog.js';
-import type { UserRec } from './db.js';
+import type { UserRec } from './db-core.js';
 import type { Game } from './game.js';
 
 export function questHook(g: Game, u: UserRec, kind: QuestTaskKind, data: { amount?: number; zone?: string; tags?: string[]; sym?: string; questId?: string } = {}) {

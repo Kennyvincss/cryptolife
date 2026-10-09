@@ -16,7 +16,7 @@ export class Renderer {
   quality: Quality;
 
   constructor(container: HTMLElement) {
-    this.quality = (localStorage.getItem('cc_quality') as Quality) || 'medium';
+    this.quality = (localStorage.getItem('cc_quality') as Quality) || (matchMedia('(pointer: coarse)').matches ? 'low' : 'medium');
     this.renderer = new THREE.WebGLRenderer({ antialias: this.quality !== 'low', powerPreference: 'high-performance' });
     this.renderer.shadowMap.enabled = this.quality !== 'low';
     this.renderer.shadowMap.type = THREE.PCFShadowMap;

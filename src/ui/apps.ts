@@ -8,7 +8,7 @@ import type { CityEvent, DaoRecord, JobListing, Post, ProjectRecord, PublicProfi
 import { api } from '../api.js';
 import { audio } from '../audio/audio.js';
 import { ORIGINALS, STATIONS, music } from '../audio/music.js';
-import { act } from '../net/client.js';
+import { act, tokenKey } from '../net/client.js';
 import { clockString, fmt, portfolioValue, store } from '../state.js';
 import { challengeView, profileCard, run, toast, tradingView } from './components.js';
 import { SIM, add, badge, btn, field, h, input, invalidate, select, useData } from './dom.js';
@@ -357,7 +357,7 @@ const profile: App = {
       summary ? h('div.card.story', h('small.muted', `SEASON ${summary.season} SUMMARY — built from your recorded activity`), summary.lines.map((l: string) => h('p', l)), h('div.muted', `Net worth ${fmt.usd(summary.stats.netWorth)} · level ${summary.stats.level} · reputation ${summary.stats.reputation} · ${summary.stats.trades} trades (realized ${fmt.usd(summary.stats.realizedPnl)}) · ${summary.stats.rides} rides driven · top skill: ${summary.stats.topSkill}`))
         : btn('Generate season summary', () => ctx.open('profile', { summary: true }), 'primary'),
       sub('Journey log'), h('div.list.scroll', me.journey.slice().reverse().map((j) => h('div.tx', h('div', j.text), h('small.muted', fmt.ago(j.ts))))),
-      h('div', btn('Leaderboards', () => ctx.open('leaders'), 'ghost'), btn('Settings', () => ctx.open('settings'), 'ghost'), btn('Sign out', () => { localStorage.removeItem('cc_token'); location.reload(); }, 'ghost danger')),
+      h('div', btn('Leaderboards', () => ctx.open('leaders'), 'ghost'), btn('Settings', () => ctx.open('settings'), 'ghost'), btn('Sign out', () => { localStorage.removeItem(tokenKey()); location.reload(); }, 'ghost danger')),
     );
   },
 };

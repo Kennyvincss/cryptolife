@@ -10,19 +10,60 @@ let token = '';
 let reconnectTimer = 0;
 let lastMeKey = '';
 
+// Where the game server lives. Empty = same origin (npm run dev / npm start).
+// For a static deploy (Vercel) set VITE_SERVER_URL=https://your-game-server.example.com
+const SERVER = String(import.meta.env.VITE_SERVER_URL ?? '').replace(/\/$/, '');
+
+export const tokenKey = () => 'cc_token_' + netMode;
+
+export type NetMode = 'online' | 'local';
+export let netMode: NetMode = 'online';
+let local: typeof import('./local.js') | null = null;
+
+/** Online if a game server answers, otherwise the in-browser single-player engine. */
+export async function detectMode(): Promise<NetMode> {
+  if (new URLSearchParams(location.search).has('offline')) return useLocal();
+  try {
+    const ctl = new AbortController();
+    const t = setTimeout(() => ctl.abort(), 3000);
+    const r = await fetch(SERVER + '/api/health', { signal: ctl.signal });
+    clearTimeout(t);
+    const j = await r.json();
+    if (j?.ok) { netMode = 'online'; return netMode; }
+  } catch { /* fall through */ }
+  return useLocal();
+}
+async function useLocal(): Promise<NetMode> {
+  local = await import('./local.js');
+  await local.boot();
+  netMode = 'local';
+  return netMode;
+}
+
 export async function auth(kind: 'login' | 'register', username: string, password: string) {
-  const r = await fetch('/api/' + kind, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username, password }) });
+  if (netMode === 'local') return local!.auth(kind, username, password);
   let j: any;
-  try { j = await r.json(); } catch { throw new Error('Server unreachable. Is `npm run dev` running?'); }
+  try {
+    const r = await fetch(SERVER + '/api/' + kind, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username, password }) });
+    j = await r.json();
+  } catch { throw new Error('Game server unreachable. Reload to play offline.'); }
   if (!j.ok) throw new Error(j.error ?? 'Failed');
   return j as { token: string; id: string };
 }
 
 export function connect(t: string): Promise<void> {
   token = t;
+  if (netMode === 'local') {
+    return new Promise((resolve, reject) => {
+      try {
+        local!.connect(t, (m) => handle(m, resolve));
+        store.online = true;
+      } catch { reject(new Error('Session expired')); }
+    });
+  }
   return new Promise((resolve, reject) => {
-    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    ws = new WebSocket(`${proto}://${location.host}/ws?token=${encodeURIComponent(t)}`);
+    const base = SERVER || `${location.protocol}//${location.host}`;
+    ws = new WebSocket(base.replace(/^http/, 'ws') + `/ws?token=${encodeURIComponent(t)}`);
     let opened = false;
     ws.onopen = () => { opened = true; store.online = true; emit('net', true); };
     ws.onmessage = (ev) => {
@@ -40,6 +81,12 @@ export function connect(t: string): Promise<void> {
       reconnectTimer = window.setTimeout(() => connect(token).catch(() => {}), 2500);
     };
   });
+}
+
+function send(msg: unknown) {
+  if (netMode === 'local') { local!.send(msg); return true; }
+  if (ws && ws.readyState === WebSocket.OPEN) { ws.send(JSON.stringify(msg)); return true; }
+  return false;
 }
 
 function handle(m: any, onInit: () => void) {
@@ -85,20 +132,19 @@ function handle(m: any, onInit: () => void) {
     case 'post': store.posts.unshift(m.post); emit('post', m.post); break;
     case 'invite': emit('invite', m); break;
     case 'react': emit('react', m); break;
-    case 'error': emit('notify', { text: m.error === 'auth' ? 'Session expired — please sign in again.' : m.error, kind: 'warn' }); if (m.error === 'auth') { localStorage.removeItem('cc_token'); setTimeout(() => location.reload(), 1500); } break;
+    case 'error': emit('notify', { text: m.error === 'auth' ? 'Session expired — please sign in again.' : m.error, kind: 'warn' }); if (m.error === 'auth') { localStorage.removeItem(tokenKey()); setTimeout(() => location.reload(), 1500); } break;
   }
 }
 
 export function act<T = any>(a: string, d: Record<string, unknown> = {}): Promise<T> {
   return new Promise((res, rej) => {
-    if (!ws || ws.readyState !== WebSocket.OPEN) { rej(new Error('Not connected to the server')); return; }
     const id = seq++;
     pending.set(id, { res, rej });
-    ws.send(JSON.stringify({ t: 'act', id, a, d }));
+    if (!send({ t: 'act', id, a, d })) { pending.delete(id); rej(new Error('Not connected to the server')); return; }
     setTimeout(() => { if (pending.has(id)) { pending.delete(id); rej(new Error('Request timed out')); } }, 15000);
   });
 }
 
 export function sendPos(p: [number, number, number], r: number, a: string, veh?: { model: string; color: string; rims: string } | null, mu?: { track: number; t0: number } | null) {
-  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ t: 'pos', p, r, a, veh: veh ?? undefined, mu: mu ?? null }));
+  send({ t: 'pos', p, r, a, veh: veh ?? undefined, mu: mu ?? null });
 }

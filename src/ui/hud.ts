@@ -45,6 +45,7 @@ export class HUD {
   mapOpen = false;
   chatOpen = false;
   onMapClick?: (x: number, z: number) => void;
+  onPromptTap?: (key: string) => void;
   mapMarks: () => MapMarks = () => ({ player: { x: 0, z: 0, heading: 0 } });
 
   constructor() {
@@ -135,7 +136,8 @@ export class HUD {
     if (this.promptsEl.dataset.k === key) return;
     this.promptsEl.dataset.k = key;
     this.promptsEl.innerHTML = '';
-    add(this.promptsEl, items.map((i) => h('div.prompt', h('kbd', i.key), labelOf(i))), extra.map((e) => h('div.prompt', h('kbd', e.split(' ')[0]), e.split(' ').slice(1).join(' '))));
+    const tap = (k: string) => (ev: Event) => { ev.preventDefault(); ev.stopPropagation(); this.onPromptTap?.(k); };
+    add(this.promptsEl, items.map((i) => h('div.prompt', { onpointerdown: tap(i.key) }, h('kbd', i.key), labelOf(i))), extra.map((e) => { const k = e.split(' ')[0]; return h('div.prompt', { onpointerdown: k.length === 1 ? tap(k) : undefined }, h('kbd', k), e.split(' ').slice(1).join(' ')); }));
   }
 
   setSpeed(kmh: number | null, condition?: number) {

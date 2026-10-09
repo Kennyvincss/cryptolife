@@ -4,21 +4,22 @@ import * as THREE from 'three';
 import { CAREERS, CLOTHING_BY_ID, EYE_COLORS, HAIR_COLORS, HAIR_STYLES, SKIN_TONES, defaultLook } from '../../shared/catalog.js';
 import type { Career, Look } from '../../shared/types.js';
 import { Humanoid } from '../entities/humanoid.js';
-import { auth } from '../net/client.js';
+import { auth, netMode, tokenKey } from '../net/client.js';
 import { add, btn, h, input } from './dom.js';
 
 export function loginScreen(): Promise<{ token: string; isNew: boolean }> {
   return new Promise((resolve) => {
     let mode: 'login' | 'register' = 'login';
-    const user = input({ placeholder: 'Username (3–16 letters, numbers, _)', maxlength: 16 });
+    const user = input({ placeholder: 'Username (letters, numbers, _ — not an email)', maxlength: 16, autocapitalize: 'off', autocorrect: 'off', spellcheck: false });
     const pass = input({ placeholder: 'Password (6+ characters)', type: 'password' });
     const err = h('div.err');
     const title = h('h2', 'Welcome back');
     const go = async () => {
       err.textContent = '';
+      if (user.value.includes('@')) { err.textContent = 'Pick a username (3–16 letters, numbers or _) — email addresses aren’t used.'; return; }
       try {
         const r = await auth(mode, user.value.trim(), pass.value);
-        localStorage.setItem('cc_token', r.token);
+        localStorage.setItem(tokenKey(), r.token);
         el.remove();
         resolve({ token: r.token, isNew: mode === 'register' });
       } catch (e) { err.textContent = (e as Error).message; }
@@ -30,6 +31,9 @@ export function loginScreen(): Promise<{ token: string; isNew: boolean }> {
       h('div.login-card',
         h('div.logo', h('span', 'CRYPTO'), h('b', 'CITY')),
         h('p.tag', 'Build your life. Make money. Explore the city. Meet people. Start businesses. Trade. Become whoever you want to be.'),
+        netMode === 'local'
+          ? h('div.modebadge.local', h('b', '● Offline single-player'), h('small', 'No game server is connected, so the city runs in your browser. Progress is saved on this device only. Multiplayer, chat with other players and leaderboards with others need a game server.'))
+          : h('div.modebadge.online', h('b', '● Online'), h('small', 'Connected to the Crypto City server — multiplayer enabled.')),
         title, user, pass, submit, err, toggle,
         h('small.muted', 'Prototype build — every balance, price and reward is SIMULATED game currency. No real money or crypto is involved.')));
     document.body.append(el);

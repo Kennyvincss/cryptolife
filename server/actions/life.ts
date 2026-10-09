@@ -5,7 +5,7 @@ import {
 } from '../../shared/catalog.js';
 import { FEATURE_BY_ZONE, doorOf } from '../../shared/city.js';
 import type { Look, PublicProfile, Slot } from '../../shared/types.js';
-import type { UserRec } from '../db.js';
+import type { UserRec } from '../db-core.js';
 import type { Game } from '../game.js';
 import { questHook } from '../quests.js';
 import { assert, clamp } from '../util.js';

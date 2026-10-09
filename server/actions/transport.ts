@@ -3,7 +3,7 @@
 import { FLEET_FEE, PAINTS, PAINT_PRICE, RIMS, UPGRADE_PRICE, VEHICLE_BY_ID } from '../../shared/catalog.js';
 import { FEATURES, FEATURE_BY_ZONE, doorOf, featureGeom, nearestCurb } from '../../shared/city.js';
 import type { RideCategory, RideState, Vec3 } from '../../shared/types.js';
-import type { UserRec } from '../db.js';
+import type { UserRec } from '../db-core.js';
 import type { Game } from '../game.js';
 import { assert, clamp, pick, round2, uid } from '../util.js';
 

@@ -3,7 +3,7 @@
 import { DAO_FEE } from '../../shared/catalog.js';
 import { FEATURE_BY_ZONE } from '../../shared/city.js';
 import type { ChatMessage, CityEvent, DaoRecord, Post } from '../../shared/types.js';
-import type { UserRec } from '../db.js';
+import type { UserRec } from '../db-core.js';
 import type { Game } from '../game.js';
 import { questHook } from '../quests.js';
 import { assert, clamp, round2, uid } from '../util.js';
