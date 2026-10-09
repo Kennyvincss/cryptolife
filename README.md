@@ -57,12 +57,13 @@ Create an account on the sign-in screen, design your character, pick a career fo
 
 ## What's in the playable build
 
-### World and graphics (three.js, all assets procedural and original)
+### World and graphics (three.js; procedural world plus credited third-party character assets)
 - **Crypto City** is a 5×4 block grid with 8 districts: Trading, Builder, DeFi, Social & Entertainment, Creator, Residential, Automotive, Convention, plus Hash Park.
 - **28 enterable venues**, each with its own interior and real activities, plus 3 home layouts (small, medium and large).
 - Textured roads with lane markings and crosswalks, raised sidewalks and curbs, generated building facades with lit windows at night, rooftop details, street lamps (the nearest ones cast real light at night), trees, benches, hydrants, working traffic signals and parked cars. Billboards carry original ads, one shows the live *simulated* price ticker, and a distant skyline and hills sit at the edge of the map.
 - A day/night cycle (24 real minutes = 1 game day) drives a physically-based sky, sun and moon light, shadows, reflections from the sky environment map, fog, stars, and bloom on neon at night. Weather (clear, cloudy, rain) is derived from the shared clock, so every client sees the same sky.
-- Characters are built procedurally with joints and animated procedurally: idle, walk, run, sit, sleep, dance (4 moves), drive, ride, phone, eat, talk, wave, workout and type. They have clothing layers, hairstyles, hats, glasses, watches, chains and bags. NPCs and remote players are merged into one mesh per joint to keep draw calls low.
+- **Seafront:** south of the city there's a wooden boardwalk with palms, benches and lamps, then a sloped beach with umbrellas, towels and a lifeguard tower. The pier is walkable, and the ocean is animated. The water is phone-friendly and needs no extra render passes. It uses two scrolling normal-map layers, a gentle vertex swell, sky reflections and sun glints, shallow-to-deep colour and a lapping foam line. You can wade out to about knee depth. Swimming is not implemented.
+- **Characters are rigged, skinned glTF bodies animated with motion-capture clips** (idle, walk, run, samba dance, nod and talk). The clips are retargeted onto each body when the game loads. This is done in world space relative to the rest pose, with A-pose and T-pose limbs normalised, so any clip plays on either body. Sitting, driving, riding, phone, wave, eat, typing, workout and sleep are layered as procedural pose overlays on top of the mocap. Skin, hair, top, bottom and shoes are recoloured per character. The female body uses a single texture, so it's recoloured through a generated per-pixel mask in one draw call. Hairstyles (on the male body), hats and glasses attach to the head bone, and held items attach to the hand bone. Distant pedestrians update their animation less often. If the assets fail to load, the game falls back to the older procedural characters.
 - Vehicles are 9 original models in 8 body styles, including a motorcycle. They have extruded body profiles, clearcoat paint, glass cabins, spoked rims, working head and brake lights, arcade physics, collisions, damage, and engine audio (electric cars whine).
 - NPC traffic follows right-hand lanes, turns at intersections, stops at red lights, follows the car ahead, brakes and honks for the player. Pedestrians walk the sidewalks and step aside. NPCs are always tagged **NPC**. Real players are tagged **PLAYER**.
 
@@ -146,7 +147,7 @@ src/
 | Real wallet / deposits / withdrawals | **Not implemented.** The wallet is simulated and labelled as such, and the Deposit/Withdraw buttons say so. | Integrate a reputable embedded-wallet provider server-side behind the existing `wallet.*` actions. Keep keys in the provider and never in the client. Add limits, recovery and fraud review. |
 | Real trading / DEX | **Not implemented.** Only the simulated market exists. | Add a separate "real market" module that uses an authorized trading API. It must never be mixed with simulated balances. |
 | Licensed music | Not integrated. All 18 tracks are original and generated in code (royalty-free). | `MusicSource` in `src/audio/music.ts` is the seam for a licensed catalog SDK. Shared playback in venues must follow that service's licensing rules. |
-| AAA graphics | Everything is procedural (no imported art). It's lit with PBR, shadows, reflections and bloom, but stylised compared with a AAA title. | Swap in glTF characters (skinned meshes and mocap), cars and props. The builders are isolated per entity type to make that straightforward. |
+| AAA graphics | Characters are rigged and use mocap, but there are only 2 base bodies (outfit *shapes* don't change, only colours). Buildings, cars and props are still procedural. There's no planar water reflection, swimming or boats. | More bodies and outfits (any Mixamo-rigged glTF works with the retargeter), glTF cars and props, and planar reflections on high quality. |
 | Anti-cheat | Economic outcomes are server-side, **but zone proximity trusts the position the client reports**. | Server-side movement validation (speed checks, interpolation) and authoritative physics for vehicles. |
 | Multiplayer scale | One Node process holds the world in memory. It works for a handful to dozens of players. Presence is broadcast at 10 Hz. | Shard by district or instance, move persistence to a database (Postgres/Redis), and add interest management. |
 | Vehicle damage | Shown as a condition percentage, which affects resale value and ride ratings. There's no visual deformation. | Damage decals and deformable panels. |
@@ -154,6 +155,19 @@ src/
 | Mobile | Touch controls are basic: stick, look-drag, buttons, tappable prompts. Phones default to low graphics quality. | Native-feeling controls and a performance pass for low-end GPUs. |
 
 ---
+
+## Third-party assets
+
+All other art and audio are generated in code. These files in `public/assets/` come from elsewhere:
+
+| File | Source | License |
+|---|---|---|
+| `chars/male.glb` | three.js examples (`readyplayer.me.glb`), © Ready Player Me | As distributed with three.js examples. Hat and teeth removed, quantized. |
+| `chars/female.glb` | three.js examples (`Michelle.glb`), Mixamo character | Mixamo/Adobe terms (royalty-free in projects). Animations stripped, quantized. |
+| `chars/anim_soldier.glb`, `chars/anim_xbot.glb`, `chars/anim_samba.glb` | three.js examples (`Soldier.glb`, `Xbot.glb`, `Michelle.glb`) and Mixamo motion capture | Mixamo/Adobe terms. Meshes stripped, so these hold the skeleton and animation only. |
+| `tex/waternormals.jpg` | three.js examples | MIT (three.js) |
+
+Before a commercial release, re-verify these terms or replace the files with assets you've commissioned or licensed.
 
 ## Testing
 

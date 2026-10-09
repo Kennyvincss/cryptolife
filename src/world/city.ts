@@ -12,6 +12,7 @@ import {
 } from '../engine/textures.js';
 import { buildVehicle } from '../entities/vehicle.js';
 import { Colliders } from './colliders.js';
+import { buildOcean, type Ocean } from './water.js';
 
 export const CURB_H = 0.15;
 
@@ -28,6 +29,7 @@ export interface CityBuild {
   signals: { ns: Record<'r' | 'y' | 'g', THREE.MeshStandardMaterial>; ew: Record<'r' | 'y' | 'g', THREE.MeshStandardMaterial> };
   screens: { draw: (prices: Record<string, number>, open: Record<string, number>, t: number) => void }[];
   groundAt: (x: number, z: number) => number;
+  ocean: Ocean;
   footprints: { x: number; z: number; w: number; d: number; h: number; district: DistrictId; feature?: string }[];
 }
 
@@ -91,9 +93,9 @@ export function buildCity(): CityBuild {
 
   const gr = grass().clone();
   gr.repeat.set(160, 160); gr.needsUpdate = true;
-  const outer = new THREE.Mesh(new THREE.PlaneGeometry(2400, 2400), new THREE.MeshStandardMaterial({ map: gr, roughness: 1, color: 0x9aa890 }));
+  const outer = new THREE.Mesh(new THREE.PlaneGeometry(2400, 1200 + maxZ), new THREE.MeshStandardMaterial({ map: gr, roughness: 1, color: 0x9aa890, polygonOffset: true, polygonOffsetFactor: 4, polygonOffsetUnits: 4 }));
   outer.rotation.x = -Math.PI / 2;
-  outer.position.y = -0.02;
+  outer.position.set(0, -0.12, (maxZ - 1200) / 2); // well below the road: phones have little depth precision far out
   outer.receiveShadow = true;
   group.add(outer);
 
@@ -503,18 +505,27 @@ export function buildCity(): CityBuild {
     const a = RF() * Math.PI * 2;
     const dist = 520 + RF() * 380;
     const w = 20 + RF() * 40, h = 30 + RF() * 160;
+    if (Math.sin(a) * dist * 0.85 > 120) continue; // ocean to the south
     B.add(tiledBox(w, h, w, FACADE_TILE.w, FACADE_TILE.h), farM, { x: Math.cos(a) * dist, y: h / 2, z: Math.sin(a) * dist * 0.85 });
   }
   const hillM = mat('hill', { color: '#4f6a45', roughness: 1 });
   for (let i = 0; i < 14; i++) {
     const a = (i / 14) * Math.PI * 2;
+    if (Math.sin(a) > 0.2) continue; // ocean to the south
     B.add(new THREE.SphereGeometry(260, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2), hillM, { x: Math.cos(a) * 1150, y: -40, z: Math.sin(a) * 1150 }, 0, { x: 1, y: 0.45, z: 1 });
   }
 
-  // city limits (invisible walls)
+  // ---------------- coastline: boardwalk, beach, pier, ocean ----------------
+  const coast = buildCoast();
+
+  // city limits (invisible walls); the south limit is knee-deep in the surf
   const bnd = 30;
   colliders.addBox((minX + maxX) / 2, minZ - bnd, maxX - minX + bnd * 4, 4, 'limit', 99);
-  colliders.addBox((minX + maxX) / 2, maxZ + bnd, maxX - minX + bnd * 4, 4, 'limit', 99);
+  {
+    const wz = coast.wadeZ + 2, l0 = minX - bnd * 2, r1 = maxX + bnd * 2;
+    colliders.addBox((l0 + coast.pierX0) / 2, wz, coast.pierX0 - l0, 4, 'limit', 99);
+    colliders.addBox((coast.pierX1 + r1) / 2, wz, r1 - coast.pierX1, 4, 'limit', 99);
+  }
   colliders.addBox(minX - bnd, (minZ + maxZ) / 2, 4, maxZ - minZ + bnd * 4, 'limit', 99);
   colliders.addBox(maxX + bnd, (minZ + maxZ) / 2, 4, maxZ - minZ + bnd * 4, 'limit', 99);
 
@@ -525,12 +536,177 @@ export function buildCity(): CityBuild {
   const blocks = [] as { x0: number; x1: number; z0: number; z1: number }[];
   for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) { const [bx, bz] = blockOrigin(c, r); blocks.push({ x0: bx, x1: bx + BLOCK, z0: bz, z1: bz + BLOCK }); }
   const groundAt = (x: number, z: number) => {
+    if (z > maxZ) return coast.groundAt(x, z);
     for (const b of blocks) if (x > b.x0 && x < b.x1 && z > b.z0 && z < b.z1) return CURB_H;
     return 0;
   };
 
   void artTexture;
-  return { group, colliders, doors, lamps, benches, nightMats, signals, screens, groundAt, footprints };
+  return { group, colliders, doors, lamps, benches, nightMats, signals, screens, groundAt, footprints, ocean: coast.ocean };
+
+  function buildCoast() {
+    const BW0 = maxZ, BW1 = maxZ + 9; // boardwalk
+    const SLOPE = 0.028, LEVEL = -0.25;
+    const sandY = (z: number) => Math.max(-1.8, CURB_H - (z - BW1) * SLOPE);
+    const shoreZ = BW1 + (CURB_H - LEVEL) / SLOPE;
+    const wadeZ = shoreZ + 7;
+    const pierX0 = -3, pierX1 = 3, PIER_Y = 1.15, PIER_Z0 = BW1 + 8, PIER_Z1 = shoreZ + 105;
+    const X0 = -1300, X1 = 1300;
+
+    // boardwalk planks
+    const plankC = document.createElement('canvas'); plankC.width = 256; plankC.height = 256;
+    {
+      const x = plankC.getContext('2d')!; const r = rng(55);
+      for (let i = 0; i < 8; i++) {
+        const v = 120 + r() * 30;
+        x.fillStyle = `rgb(${v + 40},${v + 8},${v - 30})`; x.fillRect(0, i * 32, 256, 31);
+        for (let k = 0; k < 60; k++) { x.fillStyle = `rgba(60,35,15,${0.05 + r() * 0.08})`; x.fillRect(r() * 256, i * 32 + r() * 30, 20 + r() * 80, 1); }
+        x.fillStyle = 'rgba(30,18,8,0.9)'; x.fillRect(0, i * 32 + 31, 256, 1);
+      }
+    }
+    const plankT = new THREE.CanvasTexture(plankC); plankT.colorSpace = THREE.SRGBColorSpace; plankT.wrapS = plankT.wrapT = THREE.RepeatWrapping;
+    const deckT = plankT.clone(); deckT.repeat.set(1, (BW1 - BW0) / 2.5); deckT.needsUpdate = true;
+    const walkT = plankT.clone(); walkT.repeat.set((X1 - X0) / 6, (BW1 - BW0) / 4); walkT.needsUpdate = true;
+    const boardM = new THREE.MeshStandardMaterial({ map: walkT, roughness: 0.85 });
+    const bw = new THREE.Mesh(new THREE.BoxGeometry(X1 - X0, 0.3, BW1 - BW0), boardM);
+    bw.position.set(0, CURB_H - 0.15, (BW0 + BW1) / 2);
+    bw.receiveShadow = true;
+    group.add(bw);
+
+    // sand: sloped strip, wet & darker towards the water (vertex colours)
+    const sandC = document.createElement('canvas'); sandC.width = sandC.height = 256;
+    {
+      const x = sandC.getContext('2d')!; const img = x.createImageData(256, 256); const r = rng(91);
+      for (let i = 0; i < 256 * 256; i++) { const n = (r() - 0.5) * 34 + (r() < 0.02 ? -40 : 0); img.data[i * 4] = 226 + n; img.data[i * 4 + 1] = 204 + n; img.data[i * 4 + 2] = 160 + n; img.data[i * 4 + 3] = 255; }
+      x.putImageData(img, 0, 0);
+    }
+    const sandT = new THREE.CanvasTexture(sandC); sandT.colorSpace = THREE.SRGBColorSpace; sandT.wrapS = sandT.wrapT = THREE.RepeatWrapping; sandT.repeat.set((X1 - X0) / 6, 20);
+    const SZ1 = shoreZ + 120;
+    const sandG = new THREE.PlaneGeometry(X1 - X0, SZ1 - BW1, 8, 60);
+    sandG.rotateX(-Math.PI / 2);
+    const sp = sandG.attributes.position as THREE.BufferAttribute;
+    const cols = new Float32Array(sp.count * 3);
+    for (let i = 0; i < sp.count; i++) {
+      const z = sp.getZ(i) + (BW1 + SZ1) / 2;
+      sp.setY(i, sandY(z));
+      const wet = THREE.MathUtils.smoothstep(z, shoreZ - 6, shoreZ - 1);
+      const c = 1 - wet * 0.38;
+      cols[i * 3] = c; cols[i * 3 + 1] = c * (1 - wet * 0.04); cols[i * 3 + 2] = c * (1 - wet * 0.06);
+    }
+    sandG.setAttribute('color', new THREE.BufferAttribute(cols, 3));
+    sandG.computeVertexNormals();
+    const sand = new THREE.Mesh(sandG, new THREE.MeshStandardMaterial({ map: sandT, vertexColors: true, roughness: 0.95 }));
+    sand.position.set(0, 0, (BW1 + SZ1) / 2);
+    sand.receiveShadow = true;
+    group.add(sand);
+
+    const ocean = buildOcean({ shoreZ, level: LEVEL, x0: X0, x1: X1, z1: 1500 });
+    group.add(ocean.mesh);
+
+    // seafront railing (pedestrian gaps every 32 m) keeps cars off the sand
+    const rail = mat('rail', { color: '#e8e6e0', roughness: 0.5, metalness: 0.3 });
+    for (let x = minX - 20; x < maxX + 20; x += 32) {
+      const a = x + 0.7, b = x + 32 - 0.7, len = b - a;
+      B.add(new THREE.BoxGeometry(len, 0.08, 0.08), rail, { x: (a + b) / 2, y: CURB_H + 0.95, z: BW0 + 0.4 });
+      B.add(new THREE.BoxGeometry(len, 0.06, 0.06), rail, { x: (a + b) / 2, y: CURB_H + 0.5, z: BW0 + 0.4 });
+      for (let px = a; px <= b + 0.01; px += len / 8) B.add(new THREE.CylinderGeometry(0.05, 0.05, 1, 6), rail, { x: px, y: CURB_H + 0.5, z: BW0 + 0.4 });
+      colliders.addBox((a + b) / 2, BW0 + 0.4, len, 0.3, 'rail', 1);
+    }
+    // palms, lamps and benches along the promenade
+    for (let x = minX - 10, i = 0; x < maxX + 10; x += 18, i++) {
+      if (Math.abs(x) < 8) continue;
+      palm(x, BW1 - 1.2, 0.9 + ((i * 37) % 10) / 25, i);
+      if (i % 2 === 0) bench(x + 9, BW1 - 1.6, Math.PI);
+      if (i % 3 === 1) lamp(x + 9, BW0 + 1.2, Math.PI);
+    }
+
+    // pier
+    const pierT = plankT.clone(); pierT.repeat.set(1.5, (PIER_Z1 - PIER_Z0) / 2.5); pierT.needsUpdate = true;
+    const pierM = new THREE.MeshStandardMaterial({ map: pierT, roughness: 0.85 });
+    const deck = new THREE.Mesh(new THREE.BoxGeometry(pierX1 - pierX0, 0.25, PIER_Z1 - PIER_Z0), pierM);
+    deck.position.set((pierX0 + pierX1) / 2, PIER_Y - 0.125, (PIER_Z0 + PIER_Z1) / 2);
+    deck.castShadow = deck.receiveShadow = true;
+    group.add(deck);
+    const rampLen = PIER_Z0 - BW1, rampRise = PIER_Y - CURB_H;
+    const ramp = new THREE.Mesh(new THREE.BoxGeometry(pierX1 - pierX0, 0.25, Math.hypot(rampLen, rampRise)), new THREE.MeshStandardMaterial({ map: deckT, roughness: 0.85 }));
+    ramp.position.set(0, (CURB_H + PIER_Y) / 2 - 0.125, (BW1 + PIER_Z0) / 2);
+    ramp.rotation.x = -Math.atan2(rampRise, rampLen);
+    ramp.receiveShadow = true;
+    group.add(ramp);
+    const pile = mat('pile', { color: '#4a3a2c', roughness: 0.95 });
+    for (let z = PIER_Z0 + 2; z < PIER_Z1; z += 6) for (const x of [pierX0 + 0.3, pierX1 - 0.3]) B.add(new THREE.CylinderGeometry(0.18, 0.2, 4.5, 8), pile, { x, y: PIER_Y - 2.4, z });
+    for (const x of [pierX0 + 0.1, pierX1 - 0.1]) {
+      B.add(new THREE.BoxGeometry(0.08, 0.08, PIER_Z1 - BW1), rail, { x, y: PIER_Y + 0.95, z: (BW1 + PIER_Z1) / 2 }, 0, undefined, new THREE.Euler(0, 0, 0));
+      for (let z = PIER_Z0; z <= PIER_Z1; z += 3) B.add(new THREE.CylinderGeometry(0.05, 0.05, 1, 6), rail, { x, y: PIER_Y + 0.5, z });
+      colliders.addBox(x + (x < 0 ? -0.15 : 0.15), (BW1 + PIER_Z1) / 2, 0.3, PIER_Z1 - BW1, 'rail', 1);
+    }
+    B.add(new THREE.BoxGeometry(pierX1 - pierX0, 0.08, 0.08), rail, { x: 0, y: PIER_Y + 0.95, z: PIER_Z1 - 0.1 });
+    colliders.addBox(0, PIER_Z1 + 0.1, pierX1 - pierX0 + 0.6, 0.4, 'rail', 1);
+    lamp(pierX1 - 0.4, PIER_Z1 - 20, -Math.PI / 2);
+    lamp(pierX0 + 0.4, PIER_Z1 - 50, Math.PI / 2);
+    // lifeguard tower & umbrellas
+    {
+      const wood = mat('lifeguard', { color: '#f2efe6', roughness: 0.7 });
+      const red = mat('lifeguardred', { color: '#d23b2f', roughness: 0.6 });
+      const lx = 60, lz = shoreZ - 6, ly = sandY(lz);
+      for (const [dx, dz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) B.add(new THREE.BoxGeometry(0.15, 2.6, 0.15), wood, { x: lx + dx, y: ly + 1.3, z: lz + dz });
+      B.add(new THREE.BoxGeometry(2.6, 1.6, 2.6), red, { x: lx, y: ly + 3.4, z: lz });
+      B.add(new THREE.ConeGeometry(2.2, 0.8, 4), wood, { x: lx, y: ly + 4.6, z: lz }, Math.PI / 4);
+      colliders.addBox(lx, lz, 2.4, 2.4, 'tower', 3);
+      const umb = ['#ff6b4a', '#3fa7ff', '#ffd23f', '#3fd67a', '#ff4fa3'].map((c) => mat('umb' + c, { color: c, roughness: 0.7, side: THREE.DoubleSide }));
+      const pole = mat('umbpole', { color: '#eeeeee', roughness: 0.5 });
+      const towel = ['#f5f5f5', '#2f6fd6', '#e8452c', '#f2c230'].map((c) => mat('towel' + c, { color: c, roughness: 0.95 }));
+      const RU = rng(303);
+      for (let i = 0; i < 26; i++) {
+        const x = minX + RU() * (maxX - minX), z = BW1 + 3 + RU() * (shoreZ - BW1 - 9);
+        if (Math.abs(x) < 8 || Math.abs(x - lx) < 5) continue;
+        const y = sandY(z);
+        B.add(new THREE.CylinderGeometry(0.04, 0.04, 2.3, 6), pole, { x, y: y + 1.15, z });
+        B.add(new THREE.ConeGeometry(1.5, 0.5, 10, 1, true), umb[i % umb.length], { x, y: y + 2.3, z });
+        B.add(new THREE.BoxGeometry(0.9, 0.02, 1.9), towel[i % towel.length], { x: x + 1.1, y: y + 0.02, z: z + 0.6 }, RU() * 0.6 - 0.3);
+        colliders.addBox(x, z, 0.3, 0.3, 'umbrella', 2);
+      }
+    }
+
+    const groundAt = (x: number, z: number) => {
+      if (x > pierX0 && x < pierX1 && z > BW1 && z < PIER_Z1) {
+        if (z < PIER_Z0) return CURB_H + ((z - BW1) / rampLen) * rampRise;
+        return PIER_Y;
+      }
+      if (z < BW1) return CURB_H;
+      return sandY(z);
+    };
+    return { groundAt, ocean, shoreZ, wadeZ, pierX0, pierX1 };
+  }
+
+  function palm(x: number, z: number, s: number, seed: number) {
+    const bark = mat('palmbark', { color: '#8a7055', roughness: 1 });
+    const frondM = mat('palmfrond', { color: '#3e7a32', roughness: 0.9, side: THREE.DoubleSide });
+    const r = rng(seed * 31 + 7);
+    const lean = (r() - 0.5) * 0.5, dir = r() * Math.PI * 2;
+    let px = x, py = CURB_H, pz = z;
+    const segs = 6, segH = 1.35 * s;
+    for (let i = 0; i < segs; i++) {
+      const t = (i + 1) / segs;
+      const tilt = lean * t * t;
+      const nx = px + Math.cos(dir) * Math.sin(tilt) * segH, nz = pz + Math.sin(dir) * Math.sin(tilt) * segH, ny = py + Math.cos(tilt) * segH;
+      const g = new THREE.CylinderGeometry(0.15 * s * (1 - t * 0.35), 0.18 * s * (1 - (i / segs) * 0.35), segH * 1.04, 7);
+      const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(nx - px, ny - py, nz - pz).normalize());
+      B.add(g, bark, { x: (px + nx) / 2, y: (py + ny) / 2, z: (pz + nz) / 2 }, 0, undefined, new THREE.Euler().setFromQuaternion(q));
+      px = nx; py = ny; pz = nz;
+    }
+    const frond = new THREE.PlaneGeometry(0.75 * s, 3.4 * s, 1, 4);
+    frond.translate(0, 1.7 * s, 0);
+    const fp = frond.attributes.position as THREE.BufferAttribute;
+    for (let i = 0; i < fp.count; i++) { const v = fp.getY(i) / (3.4 * s); fp.setZ(i, -v * v * 1.6 * s); fp.setX(i, fp.getX(i) * (1 - v * 0.7)); }
+    frond.computeVertexNormals();
+    for (let k = 0; k < 9; k++) {
+      const a = (k / 9) * Math.PI * 2 + r() * 0.3;
+      B.add(frond, frondM, { x: px, y: py, z: pz }, 0, undefined, new THREE.Euler(-1.05 + r() * 0.3, a, 0, 'YXZ'));
+    }
+    B.add(new THREE.SphereGeometry(0.22 * s, 8, 6), mat('coconut', { color: '#5a4026', roughness: 0.8 }), { x: px, y: py - 0.15, z: pz });
+    colliders.addBox(x, z, 0.5, 0.5, 'palm', 6);
+  }
 }
 
 function drawTicker(x: CanvasRenderingContext2D, prices: Record<string, number>, open: Record<string, number>, t: number, tex: THREE.Texture) {

@@ -12,6 +12,7 @@ import { enableLandscape } from './ui/orient.js';
 import { Renderer } from './engine/renderer.js';
 import { Environment } from './engine/sky.js';
 import { Humanoid, randomLook, type Anim } from './entities/humanoid.js';
+import { loadRigs } from './entities/rig.js';
 import { Car } from './entities/vehicle.js';
 import { act, connect, detectMode, sendPos, tokenKey } from './net/client.js';
 import { emit, gameMinutes, on, store } from './state.js';
@@ -243,6 +244,7 @@ async function refreshCityLists() {
 // ------------------------------------------------------------------ boot
 async function boot() {
   setLoading('Connecting…');
+  const rigs = loadRigs(); // characters + mocap stream in while we connect / log in
   await detectMode();
   loading?.classList.add('hidden');
   let token = localStorage.getItem(tokenKey());
@@ -256,6 +258,10 @@ async function boot() {
     await connect(token!);
   }
   const me = store.me!;
+  setLoading('Loading characters…');
+  loading?.classList.remove('hidden');
+  await rigs;
+  loading?.classList.add('hidden');
   if (isNew) {
     const r = await characterCreator(me.look, me.career);
     await run(act('profile.setLook', { look: r.look }));
@@ -545,6 +551,7 @@ function loop(now: number) {
   const gm = gameMinutes();
   const focus = player.mode === 'drive' && player.car ? player.car.pos : player.pos;
   const night = env.update(gm, focus, R.camera.position, dt);
+  if (zone === 'street') city.ocean.update(now / 1000);
   for (const nm of city.nightMats) nm.m.emissiveIntensity = nm.base + (nm.night - nm.base) * night;
   if (zone === 'street') { R.bloom.strength = 0.08 + night * 0.6; R.bloom.threshold = 0.98 - night * 0.18; }
   else { R.bloom.strength = zone === 'club' ? 0.7 : 0.18; R.bloom.threshold = zone === 'club' ? 0.7 : 0.95; R.renderer.toneMappingExposure = 0.8; }

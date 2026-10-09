@@ -1,7 +1,7 @@
 // NPC traffic on the road grid (right-hand lanes, signals, car following) and sidewalk pedestrians.
 
 import * as THREE from 'three';
-import { BLOCK, COLS, ROAD_X, ROAD_Z, ROWS, blockOrigin } from '../../shared/city.js';
+import { BLOCK, COLS, ROAD, ROAD_X, ROAD_Z, ROWS, blockOrigin } from '../../shared/city.js';
 import { Humanoid, randomLook } from '../entities/humanoid.js';
 import { Car } from '../entities/vehicle.js';
 
@@ -181,16 +181,31 @@ export class Pedestrians {
       this.group.add(h.root);
       this.peds.push({ h, loop, seg: k % 4, t: Math.random(), dir: k % 3 === 0 ? -1 : 1, speed: 1.1 + Math.random() * 0.5, pause: 0, anim: 'walk', side: 0 });
     }
+    // seafront strollers on the boardwalk (see buildCoast in world/city.ts)
+    const bz = ROAD_Z[ROAD_Z.length - 1] + ROAD / 2;
+    for (let k = 0; k < 8; k++) {
+      const x0 = -230 + k * 58, len = 40 + (k % 3) * 15;
+      const loop = [
+        new THREE.Vector3(x0, 0.15, bz + 3.4), new THREE.Vector3(x0 + len, 0.15, bz + 3.4),
+        new THREE.Vector3(x0 + len, 0.15, bz + 5.2), new THREE.Vector3(x0, 0.15, bz + 5.2),
+      ];
+      const h = new Humanoid(randomLook(5000 + k * 11));
+      h.setNameTag('Citizen', 'npc');
+      h.showTag(false);
+      this.group.add(h.root);
+      this.peds.push({ h, loop, seg: k % 2 ? 0 : 2, t: Math.random(), dir: 1, speed: 0.9 + Math.random() * 0.4, pause: 0, anim: 'walk', side: 0 });
+    }
   }
 
   update(dt: number, focus: THREE.Vector3, player: THREE.Vector3, playerCar: { pos: THREE.Vector3; speed: number } | null) {
     for (const p of this.peds) {
       const d = p.h.root.position.distanceTo(focus);
-      const visible = d < 150;
+      const visible = d < 110;
       p.h.root.visible = visible;
       if (!visible) continue;
       p.h.showTag(d < 7);
       if ((d < 35) !== p.h.castShadows) p.h.setShadows(d < 35);
+      p.h.setAnimStep(d < 25 ? 0 : d < 60 ? 1 / 20 : 1 / 8);
       if (p.pause > 0) {
         p.pause -= dt;
         p.h.update(dt, p.anim === 'walk' ? 'idle' : p.anim);

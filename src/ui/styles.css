@@ -225,8 +225,8 @@ pre.keys, .help pre { font-family: Consolas, monospace; font-size: 12px; white-s
 .help { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: var(--bg2); padding: 20px 26px; border-radius: 16px; border: 1px solid var(--line); }
 
 /* login & creator */
-.login, .creator { position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center; background: radial-gradient(circle at 30% 20%, rgba(56,242,165,0.15), transparent 50%), radial-gradient(circle at 80% 80%, rgba(180,107,255,0.18), transparent 50%), rgba(5,7,12,0.88); backdrop-filter: blur(4px); }
-.login-card { width: 400px; background: var(--bg2); border: 1px solid var(--line); border-radius: 20px; padding: 28px; display: flex; flex-direction: column; gap: 10px; box-shadow: 0 30px 90px rgba(0,0,0,0.6); }
+.login, .creator { position: fixed; inset: 0; z-index: 60; display: flex; align-items: safe center; justify-content: center; overflow-y: auto; -webkit-overflow-scrolling: touch; background: radial-gradient(circle at 30% 20%, rgba(56,242,165,0.15), transparent 50%), radial-gradient(circle at 80% 80%, rgba(180,107,255,0.18), transparent 50%), rgba(5,7,12,0.88); backdrop-filter: blur(4px); }
+.login-card { width: 400px; margin: auto 0; flex-shrink: 0; background: var(--bg2); border: 1px solid var(--line); border-radius: 20px; padding: 28px; display: flex; flex-direction: column; gap: 10px; box-shadow: 0 30px 90px rgba(0,0,0,0.6); }
 .login-card .logo { font-size: 34px; letter-spacing: 0.18em; text-align: center; }
 .login-card .tag { color: var(--muted); text-align: center; font-size: 13px; margin: 0 0 6px; }
 .err { color: var(--bad); min-height: 18px; font-size: 13px; }
@@ -321,3 +321,11 @@ body.land .help { max-width: 90%; font-size: 12px; }
 .pkey { flex: 1; background: linear-gradient(#fff, #e8e8e8); border: 1px solid #999; border-radius: 0 0 6px 6px; margin: 0 1px; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 6px; color: #888; }
 .pkey.black { flex: 0 0 22px; margin: 0 -11px; height: 105px; z-index: 2; background: linear-gradient(#333, #000); color: #aaa; }
 .pkey.down { background: #38f2a5; }
+
+/* short landscape phones: compact sign-in card */
+@media (max-height: 480px) {
+  .login { align-items: flex-start; padding: 10px 0; }
+  .login-card { width: min(560px, 92vw); padding: 14px 18px; gap: 6px; }
+  .login-card .logo { font-size: 24px; }
+  .login-card .tag { margin: 0; }
+}

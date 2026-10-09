@@ -2,7 +2,7 @@
 // prompts (bottom-right), chat, toasts, phone shell and panel host.
 
 import { levelFromXp, xpForLevel } from '../../shared/catalog.js';
-import { DISTRICTS, districtAt } from '../../shared/city.js';
+import { DISTRICTS, ROAD, ROAD_Z, districtAt } from '../../shared/city.js';
 import { music } from '../audio/music.js';
 import { act } from '../net/client.js';
 import { clockString, emit, fmt, on, portfolioValue, store } from '../state.js';
@@ -149,7 +149,8 @@ export class HUD {
   frame(marks: MapMarks, yaw: number, zone: string, zoneLabel: string) {
     drawMinimap(this.miniCtx, 220, marks, yaw);
     const d = zone === 'street' ? districtAt(marks.player.x, marks.player.z) : null;
-    const loc = zone === 'street' ? (d ? DISTRICTS[d].name : 'City outskirts') : zoneLabel;
+    const seafront = marks.player.z > ROAD_Z[ROAD_Z.length - 1] + ROAD / 2;
+    const loc = zone === 'street' ? (d ? DISTRICTS[d].name : seafront ? (marks.player.z > ROAD_Z[ROAD_Z.length - 1] + 26 ? 'Genesis Pier' : 'Satoshi Beach') : 'City outskirts') : zoneLabel;
     if (this.locEl.textContent !== loc) this.locEl.textContent = loc;
     if (this.mapOpen) this.renderMap();
     const pc = this.phoneEl.querySelector('.ph-clock');

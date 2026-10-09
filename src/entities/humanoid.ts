@@ -6,6 +6,8 @@ import type { Look } from '../../shared/types.js';
 import { mat, roundedBox } from '../engine/build.js';
 import { fabric } from '../engine/textures.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { rigsReady } from './rig.js';
+import { RigBody } from './rigbody.js';
 
 const BAKED_MAT = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.72, metalness: 0 });
 
@@ -58,6 +60,8 @@ export class Humanoid {
   private blink = 0;
   private eyes: THREE.Object3D[] = [];
   castShadows = true;
+  /** Mocap-animated skinned body (when the rig assets loaded); procedural otherwise. */
+  rig: RigBody | null = null;
 
   constructor(look: Look) {
     this.look = look;
@@ -68,6 +72,8 @@ export class Humanoid {
 
   setLook(look: Look) {
     this.look = look;
+    this.rig?.dispose();
+    this.rig = null;
     this.body.clear();
     this.joints = [];
     this.eyes = [];
@@ -87,6 +93,7 @@ export class Humanoid {
   }
 
   private build() {
+    if (rigsReady()) { this.buildRig(); return; }
     const L = this.look;
     const f = L.body === 'f';
     const H = L.height;
@@ -286,6 +293,32 @@ export class Humanoid {
     this.setShadows(this.castShadows);
   }
 
+  private buildRig() {
+    const L = this.look;
+    this.body.position.set(0, 0, 0);
+    this.body.rotation.set(0, 0, 0);
+    this.body.scale.setScalar(1);
+    this.rig = new RigBody(L, this.body);
+    this.body.add(this.rig.root);
+    this.hipHeight = this.rig.hipHeight;
+    this.head.position.set(0, 0, 0);
+    this.rig.head.add(this.head);
+    // the female body ships with its own hair; the male body is bald, so add a cut
+    if (L.body !== 'f') this.buildHair(L, mat('hair_' + L.hairColor, { color: L.hairColor, roughness: 0.75, metalness: 0.05 }));
+    this.buildHat(L);
+    this.buildGlasses(L);
+    this.rHand.position.set(0, 0, 0);
+    this.rig.hand.add(this.rHand);
+    this.rHand.add(this.phone);
+    this.phone.position.set(0, 0, 0.03);
+    this.phone.rotation.set(-0.3, 0, 0);
+    this.phone.visible = false;
+    this.setShadows(this.castShadows);
+  }
+
+  /** Skip animation updates until `secs` have accumulated (crowd LOD). */
+  setAnimStep(secs: number) { if (this.rig) this.rig.animStep = secs; }
+
   private buildHair(L: Look, hm: THREE.Material) {
     const s = L.hairStyle;
     if (s === 6) return; // bald
@@ -358,6 +391,7 @@ export class Humanoid {
    * NPCs and remote players to cut draw calls ~4x (the local player keeps full detail).
    */
   bake() {
+    if (this.rig) return; // skinned bodies are already a handful of draw calls
     const stops = new Set<THREE.Object3D>([...this.joints.map((j) => j.g), this.rHand, this.body]);
     const inv = new THREE.Matrix4();
     const rel = new THREE.Matrix4();
@@ -442,6 +476,15 @@ export class Humanoid {
   update(dt: number, anim: Anim, speed = 0) {
     this.anim = anim;
     this.speed = speed;
+    if (this.rig) {
+      this.phone.visible = anim === 'phone';
+      this.rig.danceOffset = this.danceMove * 2.3;
+      this.rig.update(dt, anim, speed);
+      const k = 1 - Math.exp(-dt * 12);
+      this.body.position.y += (this.rig.bodyOffset(anim) - this.body.position.y) * k;
+      this.body.rotation.x += ((anim === 'sleep' ? -Math.PI / 2 : 0) - this.body.rotation.x) * k;
+      return;
+    }
     const T = this.joints;
     for (const j of T) j.target.set(0, 0, 0);
     const [hips, spine, chest, neck, head, lS, rS, lE, rE, lH, rH, lK, rK, lF, rF] = T.map((j) => j.target);
@@ -564,8 +607,9 @@ export class Humanoid {
   dispose() {
     this.root.traverse((o) => {
       const m = o as THREE.Mesh;
-      if (m.isMesh) m.geometry.dispose();
+      if (m.isMesh && !m.userData.shared) m.geometry.dispose();
     });
+    this.rig?.dispose();
     this.root.removeFromParent();
   }
 }

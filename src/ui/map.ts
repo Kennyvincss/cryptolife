@@ -28,6 +28,16 @@ export function buildBaseMap(city: CityBuild) {
   const [rx0, rz0] = P(ROAD_X[0] - 8, ROAD_Z[0] - 8);
   const [rx1, rz1] = P(ROAD_X[ROAD_X.length - 1] + 8, ROAD_Z[ROAD_Z.length - 1] + 8);
   x.fillRect(rx0, rz0, rx1 - rx0, rz1 - rz0);
+  // seafront: boardwalk, beach, ocean and the pier (matches world/city.ts buildCoast)
+  {
+    const edge = ROAD_Z[ROAD_Z.length - 1] + 8;
+    const [, bw] = P(0, edge), [, sd] = P(0, edge + 9), [, sh] = P(0, edge + 23);
+    x.fillStyle = '#8a6a48'; x.fillRect(0, bw, c.width, sd - bw);
+    x.fillStyle = '#cdb98c'; x.fillRect(0, sd, c.width, sh - sd);
+    x.fillStyle = '#1f5f7a'; x.fillRect(0, sh, c.width, c.height - sh);
+    const [p0, pz] = P(-3, edge + 9);
+    x.fillStyle = '#8a6a48'; x.fillRect(p0, pz, 6 * SCALE, c.height - pz);
+  }
   for (let r = 0; r < ROWS; r++) for (let col = 0; col < COLS; col++) {
     const [bx, bz] = blockOrigin(col, r);
     const d = BLOCK_DISTRICT[r][col];
