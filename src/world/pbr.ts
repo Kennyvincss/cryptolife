@@ -116,3 +116,22 @@ export function wearPaint(m: THREE.MeshStandardMaterial, strength = 1) {
   m.customProgramCacheKey = () => 'wornpaint' + strength;
   return m;
 }
+
+/** Street decals atlas: 0 manhole, 1 drain grate, 2 oil stain, 3 cracks. */
+export function decalMaterial() {
+  const base = (import.meta.env.BASE_URL ?? '/') + 'assets/tex/';
+  const map = loader.load(base + 'decals_albedo.png');
+  map.colorSpace = THREE.SRGBColorSpace; map.anisotropy = aniso;
+  const normalMap = loader.load(base + 'decals_normal.jpg');
+  normalMap.anisotropy = aniso;
+  return new THREE.MeshStandardMaterial({ map, normalMap, transparent: true, depthWrite: false, roughness: 0.55, metalness: 0.25, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
+}
+
+/** Ground quad (lying flat) showing one tile of a horizontal atlas with `tiles` cells. */
+export function atlasQuad(w: number, h: number, tile: number, tiles = 4) {
+  const g = new THREE.PlaneGeometry(w, h);
+  const uv = g.attributes.uv as THREE.BufferAttribute;
+  for (let i = 0; i < uv.count; i++) uv.setX(i, (tile + uv.getX(i)) / tiles);
+  g.rotateX(-Math.PI / 2);
+  return g;
+}

@@ -14,7 +14,7 @@ import { buildVehicle } from '../entities/vehicle.js';
 import { Colliders } from './colliders.js';
 import { buildOcean, type Ocean } from './water.js';
 import { boxWalls, facadeMaterial, type FacadeKind } from './facade.js';
-import { surfaceMaterial, wearPaint } from './pbr.js';
+import { atlasQuad, decalMaterial, surfaceMaterial, wearPaint } from './pbr.js';
 import type { TreeSpot } from './trees.js';
 
 export const CURB_H = 0.15;
@@ -68,6 +68,20 @@ export function buildCity(lowQuality = false): CityBuild {
   const R = rng(1234);
   const trees: TreeSpot[] = [];
   const parked: { model: string; color: string; x: number; z: number; rot: number }[] = [];
+  // shared street-furniture geometry (built once, merged many times)
+  const SF = (() => {
+    const poleProfile = [new THREE.Vector2(0.15, 0), new THREE.Vector2(0.15, 0.06), new THREE.Vector2(0.12, 0.1), new THREE.Vector2(0.115, 0.5), new THREE.Vector2(0.095, 0.55), new THREE.Vector2(0.07, 8.0), new THREE.Vector2(0.0, 8.0)];
+    const pole = new THREE.LatheGeometry(poleProfile, 14);
+    const armCurve = new THREE.CubicBezierCurve3(new THREE.Vector3(0, 7.7, 0), new THREE.Vector3(0, 8.4, 0.2), new THREE.Vector3(0, 8.35, 1.2), new THREE.Vector3(0, 8.2, 2.1));
+    const arm = new THREE.TubeGeometry(armCurve, 16, 0.045, 8, false);
+    const head = new THREE.CapsuleGeometry(0.17, 0.62, 4, 12).rotateX(Math.PI / 2).scale(1.1, 0.55, 1);
+    const hydrantProfile = [0.0, 0.13, 0.13, 0.11, 0.11, 0.12, 0.12, 0.1, 0.06, 0.0].map((r, i) => new THREE.Vector2(r, [0, 0, 0.06, 0.08, 0.5, 0.52, 0.56, 0.62, 0.68, 0.7][i]));
+    const hydrant = new THREE.LatheGeometry(hydrantProfile, 12);
+    return { pole, arm, head, hydrant };
+  })();
+  const metalDark = mat('lamppole', { color: '#2a2d33', metalness: 0.75, roughness: 0.38 });
+  const galv = mat('galvanised', { color: '#9aa0a4', metalness: 0.85, roughness: 0.45 });
+
   const pitM = mat('treepit', { color: '#3a2c22', roughness: 1 });
   const pitEdge = mat('pitedge', { color: '#2b2d30', roughness: 0.5, metalness: 0.6 });
   const KINDS: Record<FacadeStyle, FacadeKind[]> = {
@@ -136,6 +150,22 @@ export function buildCity(lowQuality = false): CityBuild {
     const g = planeUV(ROAD, x1 - x0, ROAD, ROAD);
     B.add(g, markM, { x: (x0 + x1) / 2, y: 0.01, z: rz }, 0, undefined, new THREE.Euler(-Math.PI / 2, 0, Math.PI / 2));
     for (const xx of [x0 + 1.6, x1 - 1.6]) B.add(new THREE.PlaneGeometry(ROAD, 3), crossM, { x: xx, y: 0.012, z: rz }, 0, undefined, new THREE.Euler(-Math.PI / 2, 0, Math.PI / 2));
+  }
+
+  // ---------------- road decals: manholes, storm drains, oil stains, cracks ----------------
+  {
+    const decalM = decalMaterial();
+    const RD = rng(911);
+    const seg = (cx: number, cz: number, len: number, alongX: boolean) => {
+      const P = (a: number, c: number) => alongX ? { x: cx + a, y: 0.006, z: cz + c } : { x: cx + c, y: 0.006, z: cz + a };
+      const rotY = alongX ? 0 : Math.PI / 2;
+      for (let k = 0; k < 2; k++) if (RD() < 0.7) B.add(atlasQuad(0.85, 0.85, 0), decalM, P((RD() - 0.5) * len * 0.8, (RD() < 0.5 ? -1 : 1) * (2 + RD() * 3)), RD() * 6);
+      for (let a = -len / 2 + 8; a < len / 2 - 4; a += 24) for (const side of [-1, 1]) B.add(atlasQuad(0.95, 0.5, 1), decalM, P(a + RD() * 4, side * (ROAD / 2 - 0.32)), rotY);
+      for (let k = 0; k < 4; k++) { const sz = 1.2 + RD() * 1.8; B.add(atlasQuad(sz, sz * (0.7 + RD() * 0.6), 2), decalM, P((RD() - 0.5) * len, (RD() < 0.5 ? -1 : 1) * (1.2 + RD() * 5)), RD() * 6); }
+      for (let k = 0; k < 3; k++) { const sz = 3 + RD() * 4; B.add(atlasQuad(sz, sz, 3), decalM, P((RD() - 0.5) * len, (RD() - 0.5) * ROAD * 0.8), RD() * 6); }
+    };
+    for (const rx of ROAD_X) for (let j = 0; j < ROWS; j++) { const z0 = ROAD_Z[j] + ROAD / 2, z1 = ROAD_Z[j + 1] - ROAD / 2; seg(rx, (z0 + z1) / 2, z1 - z0, false); }
+    for (const rz of ROAD_Z) for (let i = 0; i < COLS; i++) { const x0 = ROAD_X[i] + ROAD / 2, x1 = ROAD_X[i + 1] - ROAD / 2; seg((x0 + x1) / 2, rz, x1 - x0, true); }
   }
 
   // ---------------- blocks ----------------
@@ -464,6 +494,7 @@ export function buildCity(lowQuality = false): CityBuild {
   function buildPlaza(x: number, z: number, w: number, d: number) {
     B.add(new THREE.BoxGeometry(w, 0.05, d), mat('plaza', { color: '#b9b2a6', roughness: 0.85 }), { x, y: CURB_H + 0.03, z });
     tree(x - w / 3, z - d / 3); tree(x + w / 3, z + d / 3); tree(x - w / 3, z + d / 3); tree(x + w / 3, z - d / 3);
+    for (const [ox, oz] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) trees.push({ x: x + ox * w * 0.42, y: CURB_H, z: z + oz * d * 0.42, s: 0.8, kind: 'bush' });
     bench(x, z - 2, 0); bench(x, z + 2, Math.PI);
   }
 
@@ -488,6 +519,11 @@ export function buildCity(lowQuality = false): CityBuild {
       tree(x, z, 1.2 + R2() * 0.6, 'park');
     }
     for (const [x, z, r] of [[cx - 10, cz - 4, Math.PI / 2], [cx + 10, cz + 4, -Math.PI / 2], [cx - 4, cz + 10, Math.PI], [cx + 4, cz - 10, 0], [cx - 10, cz + 4, Math.PI / 2], [cx + 10, cz - 4, -Math.PI / 2]]) bench(x, z, r);
+    // shrub borders along the park edge and the paths
+    const RB = rng(515);
+    for (let a = bx + 6; a < bx + BLOCK - 6; a += 1.5 + RB() * 0.8) for (const e of [bz + 5.5, bz + BLOCK - 5.5]) if (Math.abs(a - cx) > 3) trees.push({ x: a, y: CURB_H, z: e, s: 0.8 + RB() * 0.5, kind: 'bush' });
+    for (let a = bz + 6; a < bz + BLOCK - 6; a += 1.5 + RB() * 0.8) for (const e of [bx + 5.5, bx + BLOCK - 5.5]) if (Math.abs(a - cz) > 3) trees.push({ x: e, y: CURB_H, z: a, s: 0.8 + RB() * 0.5, kind: 'bush' });
+    for (let k = 0; k < 24; k++) { const a = (k / 24) * Math.PI * 2; if (Math.abs(Math.sin(a * 2)) < 0.25) continue; trees.push({ x: cx + Math.cos(a) * 8.2, y: CURB_H, z: cz + Math.sin(a) * 8.2, s: 0.7 + RB() * 0.3, kind: 'bush' }); }
   }
 
   // ---------------- props ----------------
@@ -516,17 +552,62 @@ export function buildCity(lowQuality = false): CityBuild {
     colliders.addBox(x, z, 0.6, 0.6, 'bench', 0.5);
   }
   function lamp(x: number, z: number, rot: number) {
-    const pole = mat('lamppole', { color: '#2a2d33', metalness: 0.7, roughness: 0.4 });
     const o = new THREE.Group();
-    const p = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.13, 6.5, 8), pole); p.position.y = 3.25; o.add(p);
-    const arm = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 1.6), pole); arm.position.set(0, 6.4, 0.75); o.add(arm);
-    const head = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.15, 0.7), pole); head.position.set(0, 6.35, 1.45); o.add(head);
+    o.add(new THREE.Mesh(SF.pole, galv));
+    o.add(new THREE.Mesh(SF.arm, galv));
+    const head = new THREE.Mesh(SF.head, metalDark); head.position.set(0, 8.18, 2.45); o.add(head);
     o.position.set(x, CURB_H, z); o.rotation.y = rot;
     B.addObject(o);
-    const bulbPos = new THREE.Vector3(0, 6.25, 1.45).applyAxisAngle(new THREE.Vector3(0, 1, 0), rot).add(new THREE.Vector3(x, CURB_H, z));
-    B.add(new THREE.BoxGeometry(0.34, 0.04, 0.6), lampBulb, bulbPos, rot);
+    const bulbPos = new THREE.Vector3(0, 8.07, 2.5).applyAxisAngle(new THREE.Vector3(0, 1, 0), rot).add(new THREE.Vector3(x, CURB_H, z));
+    B.add(new THREE.BoxGeometry(0.26, 0.02, 0.55), lampBulb, bulbPos, rot);
     lamps.push(bulbPos);
     colliders.addBox(x, z, 0.3, 0.3, 'lamp', 6);
+  }
+
+  function hydrant(x: number, z: number) {
+    const red = mat('hydrant', { color: '#b8241f', roughness: 0.55, metalness: 0.2 });
+    B.add(SF.hydrant, red, { x, y: CURB_H, z });
+    B.add(new THREE.CylinderGeometry(0.05, 0.05, 0.36, 8), red, { x, y: CURB_H + 0.42, z }, 0, undefined, new THREE.Euler(0, 0, Math.PI / 2));
+    B.add(new THREE.CylinderGeometry(0.065, 0.065, 0.12, 8), red, { x, y: CURB_H + 0.42, z: z + 0.12 }, 0, undefined, new THREE.Euler(Math.PI / 2, 0, 0));
+    B.add(new THREE.CylinderGeometry(0.035, 0.035, 0.05, 5), galv, { x, y: CURB_H + 0.72, z });
+    colliders.addBox(x, z, 0.35, 0.35, 'hydrant', 0.8);
+  }
+
+  function bin(x: number, z: number) {
+    const green = mat('binmetal', { color: '#1f3a2c', roughness: 0.55, metalness: 0.6 });
+    for (let k = 0; k < 10; k++) {
+      const a = (k / 10) * Math.PI * 2;
+      B.add(new THREE.BoxGeometry(0.06, 0.85, 0.025), green, { x: x + Math.cos(a) * 0.27, y: CURB_H + 0.47, z: z + Math.sin(a) * 0.27 }, -a);
+    }
+    B.add(new THREE.TorusGeometry(0.28, 0.025, 6, 20), green, { x, y: CURB_H + 0.9, z }, 0, undefined, new THREE.Euler(Math.PI / 2, 0, 0));
+    B.add(new THREE.TorusGeometry(0.28, 0.02, 6, 20), green, { x, y: CURB_H + 0.12, z }, 0, undefined, new THREE.Euler(Math.PI / 2, 0, 0));
+    B.add(new THREE.CylinderGeometry(0.26, 0.26, 0.02, 16), mat('binbag', { color: '#111214', roughness: 0.4 }), { x, y: CURB_H + 0.75, z });
+    colliders.addBox(x, z, 0.6, 0.6, 'bin', 1);
+  }
+
+  function busShelter(x: number, z: number, rot: number, ad: string) {
+    const frame = mat('shelterframe', { color: '#3a3e44', metalness: 0.8, roughness: 0.35 });
+    const glassM = new THREE.MeshPhysicalMaterial({ color: '#cfe0e8', roughness: 0.05, metalness: 0, transmission: 0, transparent: true, opacity: 0.22, envMapIntensity: 1.5, depthWrite: false });
+    const o = new THREE.Group();
+    const add = (g: THREE.BufferGeometry, m: THREE.Material, px: number, py: number, pz: number) => { const me = new THREE.Mesh(g, m); me.position.set(px, py, pz); o.add(me); };
+    for (const px of [-1.9, 1.9]) for (const pz of [-0.7, 0.7]) add(new THREE.BoxGeometry(0.06, 2.5, 0.06), frame, px, 1.25, pz);
+    add(new THREE.BoxGeometry(4.1, 0.08, 1.7), frame, 0, 2.52, 0);
+    add(new THREE.BoxGeometry(3.8, 2.2, 0.02), glassM, 0, 1.2, -0.7);
+    add(new THREE.BoxGeometry(0.02, 2.2, 1.3), glassM, -1.9, 1.2, 0);
+    add(new THREE.BoxGeometry(1.6, 0.06, 0.42), frame, 0.5, 0.48, -0.45);
+    o.position.set(x, CURB_H, z); o.rotation.y = rot;
+    B.addObject(o);
+    // illuminated ad panel at the open end
+    const tex = signTexture(ad, '#ffffff', '#1d2733', 'bold 64px "Segoe UI", Arial, sans-serif', 512, 1024);
+    const adM = new THREE.MeshStandardMaterial({ map: tex, emissiveMap: tex, emissive: 0xffffff, emissiveIntensity: 0.25, roughness: 0.2 });
+    nightMats.push({ m: adM, base: 0.25, night: 1.4 });
+    const panel = new THREE.Mesh(new THREE.BoxGeometry(0.05, 1.8, 1.0), adM);
+    panel.position.set(1.9, 1.2, 0).applyAxisAngle(new THREE.Vector3(0, 1, 0), rot).add(new THREE.Vector3(x, CURB_H, z));
+    panel.rotation.y = rot;
+    group.add(panel);
+    const p = new THREE.Vector3(0.5, 0, -0.45).applyAxisAngle(new THREE.Vector3(0, 1, 0), rot).add(new THREE.Vector3(x, CURB_H, z));
+    benches.push({ pos: p, rot: rot });
+    colliders.addBox(x, z, Math.abs(Math.sin(rot)) > 0.5 ? 1.6 : 4, Math.abs(Math.sin(rot)) > 0.5 ? 4 : 1.6, 'shelter', 2.5);
   }
 
   function propsAround(bx: number, bz: number, district: DistrictId) {
@@ -550,13 +631,16 @@ export function buildCity(lowQuality = false): CityBuild {
       // bins & hydrants
       const t = 5 + R() * 60;
       const x = sx + dx * t, z = sz + dz * t;
-      if (!nearDoor(x, z, 3)) {
-        B.add(new THREE.CylinderGeometry(0.28, 0.25, 0.9, 10), mat('bin', { color: '#2f5f3a', roughness: 0.7, metalness: 0.2 }), { x, y: CURB_H + 0.45, z });
-        colliders.addBox(x, z, 0.5, 0.5, 'bin', 1);
-      }
+      if (!nearDoor(x, z, 3)) bin(x, z);
       const t2 = 30 + R() * 30;
       const hx = sx + dx * t2, hz = sz + dz * t2;
-      if (!nearDoor(hx, hz, 3)) B.add(new THREE.CylinderGeometry(0.14, 0.16, 0.7, 8), mat('hydrant', { color: '#c02a2a', roughness: 0.5, metalness: 0.3 }), { x: hx, y: CURB_H + 0.35, z: hz });
+      if (!nearDoor(hx, hz, 3)) hydrant(hx, hz);
+      // bus stop on some edges
+      if (R() < 0.18 && district !== 'park') {
+        const tb = 46 + R() * 10;
+        const bx2 = sx + dx * tb + (dz ? 0.9 * (rot > 0 ? -1 : 1) : 0), bz2 = sz + dz * tb + (dx ? (rot === 0 ? -0.9 : 0.9) : 0);
+        if (!nearDoor(bx2, bz2, 5)) busShelter(bx2, bz2, rot + Math.PI, ['HODL THE LINE', 'SAFU SAVINGS', 'MINT GALLERY', 'GAS FEE BURGERS'][Math.floor(R() * 4)]);
+      }
     }
   }
   function nearDoor(x: number, z: number, r: number) {
@@ -567,23 +651,38 @@ export function buildCity(lowQuality = false): CityBuild {
   // ---------------- traffic signals ----------------
   const sig = (c: string) => mat('sig_' + c + Math.random(), { color: '#111', emissive: c, emissiveIntensity: 0.1, roughness: 0.3 }) as THREE.MeshStandardMaterial;
   const signals = { ns: { r: sig('#ff2020'), y: sig('#ffb020'), g: sig('#20ff60') }, ew: { r: sig('#ff2020'), y: sig('#ffb020'), g: sig('#20ff60') } };
-  const poleM = mat('lamppole', { color: '#2a2d33', metalness: 0.7, roughness: 0.4 });
+  const housingM = mat('sighousing', { color: '#1b1c1e', roughness: 0.55, metalness: 0.3 });
+  const backplate = mat('sigback', { color: '#0d0d0e', roughness: 0.8 });
+  const visorG = new THREE.CylinderGeometry(0.15, 0.15, 0.22, 12, 1, true, -Math.PI / 2, Math.PI);
+  const lensG = new THREE.CircleGeometry(0.12, 16);
+  function signalHead(p: THREE.Vector3, rot: number, s: Record<'r' | 'y' | 'g', THREE.MeshStandardMaterial>) {
+    const fwd = new THREE.Vector3(Math.sin(rot), 0, Math.cos(rot));
+    B.add(new THREE.BoxGeometry(0.38, 1.06, 0.26), housingM, p, rot);
+    B.add(new THREE.BoxGeometry(0.62, 1.3, 0.02), backplate, { x: p.x + fwd.x * 0.14, y: p.y, z: p.z + fwd.z * 0.14 }, rot);
+    ([['r', 0.33], ['y', 0], ['g', -0.33]] as const).forEach(([k, dy]) => {
+      B.add(lensG, s[k], { x: p.x - fwd.x * 0.135, y: p.y + dy, z: p.z - fwd.z * 0.135 }, rot + Math.PI);
+      B.add(visorG, housingM, { x: p.x - fwd.x * 0.24, y: p.y + dy + 0.02, z: p.z - fwd.z * 0.24 }, 0, undefined, new THREE.Euler(Math.PI / 2, 0, rot, 'YXZ').setFromQuaternion(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), rot + Math.PI).multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI / 2))));
+    });
+  }
   for (let i = 1; i < ROAD_X.length - 1; i++) for (let j = 1; j < ROAD_Z.length - 1; j++) {
     const ix = ROAD_X[i], iz = ROAD_Z[j];
-    // one signal per approach, on the right-hand corner
+    // mast-arm signal per approach on the right-hand corner, heads hung over the lanes
     const corners: [number, number, 'ns' | 'ew', number][] = [
       [ix - 9, iz - 9, 'ns', 0], [ix + 9, iz + 9, 'ns', Math.PI], [ix + 9, iz - 9, 'ew', -Math.PI / 2], [ix - 9, iz + 9, 'ew', Math.PI / 2],
     ];
     for (const [x, z, axis, rot] of corners) {
-      B.add(new THREE.CylinderGeometry(0.1, 0.12, 4.2, 8), poleM, { x, y: CURB_H + 2.1, z });
-      const head = new THREE.Vector3(x, CURB_H + 3.6, z);
-      const fwd = new THREE.Vector3(Math.sin(rot), 0, Math.cos(rot));
-      B.add(new THREE.BoxGeometry(0.35, 1.0, 0.3), mat('sighousing', { color: '#1a1a1a', roughness: 0.6 }), head, rot);
+      B.add(new THREE.CylinderGeometry(0.13, 0.17, 6.6, 12), galv, { x, y: CURB_H + 3.3, z });
+      B.add(new THREE.CylinderGeometry(0.25, 0.25, 0.4, 12), galv, { x, y: CURB_H + 0.2, z });
+      const arm = axis === 'ns' ? new THREE.Vector3(Math.sign(ix - x), 0, 0) : new THREE.Vector3(0, 0, Math.sign(iz - z));
+      const armLen = 7.5;
+      const mid = new THREE.Vector3(x, CURB_H + 6.3, z).addScaledVector(arm, armLen / 2);
+      B.add(new THREE.CylinderGeometry(0.07, 0.1, armLen, 10), galv, mid, 0, undefined, new THREE.Euler(axis === 'ns' ? 0 : Math.PI / 2, 0, axis === 'ns' ? Math.PI / 2 : 0));
       const s = signals[axis];
-      ([['r', 0.3], ['y', 0], ['g', -0.3]] as const).forEach(([k, dy]) => {
-        B.add(new THREE.SphereGeometry(0.1, 8, 6), s[k], { x: head.x - fwd.x * 0.16, y: head.y + dy, z: head.z - fwd.z * 0.16 });
-      });
-      colliders.addBox(x, z, 0.3, 0.3, 'signal', 4);
+      for (const d of [3.2, 6.6]) signalHead(new THREE.Vector3(x, CURB_H + 5.65, z).addScaledVector(arm, d), rot, s);
+      signalHead(new THREE.Vector3(x, CURB_H + 3.1, z).addScaledVector(arm, 0.32), rot, s);
+      // street-name blade
+      B.add(new THREE.BoxGeometry(axis === 'ns' ? 1.6 : 0.03, 0.28, axis === 'ns' ? 0.03 : 1.6), mat('streetsign', { color: '#1e6a3a', roughness: 0.4, metalness: 0.2 }), new THREE.Vector3(x, CURB_H + 6.75, z).addScaledVector(arm, 1.2));
+      colliders.addBox(x, z, 0.4, 0.4, 'signal', 6);
     }
   }
 
@@ -609,7 +708,7 @@ export function buildCity(lowQuality = false): CityBuild {
     b.rotation.y = Math.PI;
     group.add(b);
     const b2 = b.clone(); b2.position.z = fp.z + fp.d / 2 - 0.5; b2.rotation.y = 0; group.add(b2);
-    B.add(new THREE.BoxGeometry(bw, 0.3, 0.3), poleM, { x: fp.x, y: fp.h + 1, z: fp.z });
+    B.add(new THREE.BoxGeometry(bw, 0.3, 0.3), metalDark, { x: fp.x, y: fp.h + 1, z: fp.z });
   }
   // live price board on top of a trading tower
   const tradingTower = footprints.filter((f) => f.district === 'trading' && !f.feature).sort((a, b) => b.h - a.h)[0];

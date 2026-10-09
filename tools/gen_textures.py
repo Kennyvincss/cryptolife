@@ -222,6 +222,51 @@ def grass():
     save('grass', albedo, h, 0.95 - blades * 0.1, nstrength=5)
 
 
-TARGETS = dict(asphalt=asphalt, sidewalk=sidewalk, concrete=concrete, brick=brick, plaster=plaster, stone=stone, metal=metal, roof=roof, grass=grass)
+# ---------------------------------------------------------------- street decal atlas (4 x 512 tiles, RGBA)
+def decals():
+    T = 512
+    out = np.zeros((T, T * 4, 4))
+    hgt = np.zeros((T, T * 4))
+    y, x = (np.mgrid[0:T, 0:T] + 0.5) / T - 0.5
+    r = np.sqrt(x * x + y * y)
+    a = np.arctan2(y, x)
+    n = fnoise(T, beta=0.5, lo=40, seed=3)
+    rust = fnoise(T, beta=1.6, lo=2, seed=4)
+    # 0: manhole cover (cast iron, raised pattern, rim)
+    disc = (r < 0.46).astype(float)
+    rim = ((r > 0.42) & (r < 0.46)).astype(float)
+    pattern = ((np.sin(x * 70) > 0.6) | (np.sin(y * 70) > 0.6)).astype(float) * (r < 0.36)
+    ring = ((r > 0.36) & (r < 0.38)).astype(float)
+    iron = np.stack([0.17 + rust * 0.12, 0.16 + rust * 0.07, 0.15 + rust * 0.03], -1) * (0.75 + 0.5 * n[..., None])
+    out[:, 0:T, :3] = iron * (0.8 + 0.4 * pattern[..., None]) * (1 - rim[..., None] * 0.3)
+    out[:, 0:T, 3] = np.clip((0.47 - r) / 0.01, 0, 1)
+    hgt[:, 0:T] = disc * 0.3 + pattern * 0.3 + ring * 0.4 - rim * 0.2
+    # 1: storm drain grate (rectangular, slots)
+    gx, gy = np.abs(x), np.abs(y)
+    box = ((gx < 0.46) & (gy < 0.22)).astype(float)
+    slot = ((np.sin(x * 110) > 0.2) & (gy < 0.17) & (gx < 0.42)).astype(float)
+    out[:, T:2 * T, :3] = np.stack([0.2 + rust * 0.1, 0.19 + rust * 0.06, 0.18 + rust * 0.03], -1) * (1 - slot[..., None] * 0.92)
+    out[:, T:2 * T, 3] = box
+    hgt[:, T:2 * T] = box * 0.3 - slot * 0.6
+    # 2: oil / tyre stain (soft dark blot)
+    blot = np.clip(1 - r / 0.45 + (fnoise(T, beta=1.4, lo=2, seed=5) - 0.5) * 0.9, 0, 1) ** 1.5
+    out[:, 2 * T:3 * T, :3] = np.stack([0.03, 0.03, 0.035])[None, None, :] * np.ones((T, T, 1))
+    out[:, 2 * T:3 * T, 3] = blot * 0.55
+    hgt[:, 2 * T:3 * T] = 0
+    # 3: crack network (thin dark lines)
+    c1 = fnoise(T, beta=2.2, lo=2, hi=40, seed=6)
+    c2 = fnoise(T, beta=2.2, lo=2, hi=40, seed=7)
+    lines = np.clip(1 - np.abs(c1 - 0.5) / 0.012, 0, 1) * (c2 > 0.45) + np.clip(1 - np.abs(c2 - 0.55) / 0.008, 0, 1) * (c1 > 0.5)
+    fade = np.clip(1 - r / 0.5, 0, 1)
+    out[:, 3 * T:4 * T, :3] = 0.04
+    out[:, 3 * T:4 * T, 3] = np.clip(lines, 0, 1) * fade * 0.9
+    hgt[:, 3 * T:4 * T] = -np.clip(lines, 0, 1) * fade
+    Image.fromarray((np.clip(out, 0, 1) * 255).astype(np.uint8), 'RGBA').save(f'{OUT}/decals_albedo.png')
+    nrm = normal_from_height(hgt, 8)
+    Image.fromarray((np.clip(nrm, 0, 1) * 255).astype(np.uint8)).save(f'{OUT}/decals_normal.jpg', quality=90)
+    print('wrote decals')
+
+
+TARGETS = dict(decals=decals, asphalt=asphalt, sidewalk=sidewalk, concrete=concrete, brick=brick, plaster=plaster, stone=stone, metal=metal, roof=roof, grass=grass)
 for k in (sys.argv[1:] or TARGETS):
     TARGETS[k]()

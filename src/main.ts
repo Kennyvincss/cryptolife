@@ -120,7 +120,7 @@ async function enterZone(z: string, home?: HomeData) {
   player.teleport(interior.spawn, interior.spawnRot);
   for (let i = 0; i < pool.length; i++) {
     const L = interior.lights[i];
-    if (L) { pool[i].position.copy(L.pos); pool[i].color.setHex(L.color); pool[i].intensity = L.intensity * 2.2; pool[i].distance = L.distance * 1.5; }
+    if (L) { pool[i].position.copy(L.pos); pool[i].color.setHex(L.color); pool[i].intensity = L.intensity * 1.3; pool[i].distance = L.distance * 1.5; }
     else pool[i].intensity = 0;
   }
   if (interior.music) venueMusic.setStation(interior.music.station, interior.music.pos, interior.music.volume);
@@ -593,7 +593,7 @@ function loop(now: number) {
   for (const nm of city.nightMats) nm.m.emissiveIntensity = nm.base + (nm.night - nm.base) * night;
   // bloom works on linear HDR values: thresholds sit above lit surfaces so only lights and glints glow
   if (zone === 'street') { R.bloom.strength = 0.18 + night * 0.35; R.bloom.threshold = 2.2 - night * 1.2; R.bloom.radius = 0.5; }
-  else { R.bloom.strength = zone === 'club' ? 0.55 : 0.2; R.bloom.threshold = zone === 'club' ? 1.2 : 2.5; R.bloom.radius = 0.45; }
+  else { R.bloom.strength = zone === 'club' ? 0.45 : 0.14; R.bloom.threshold = zone === 'club' ? 3 : 7; R.bloom.radius = 0.4; }
   const ph = signalPhase(t);
   for (const axis of ['ns', 'ew'] as const) for (const k of ['r', 'y', 'g'] as const) city.signals[axis][k].emissiveIntensity = ph[axis] === k ? 4 : 0.05;
   if (zone === 'street') {

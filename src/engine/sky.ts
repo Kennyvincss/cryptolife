@@ -210,7 +210,7 @@ export class Environment {
     fog.color.copy(nightFog).lerp(dayFog, day);
     if (warm > 0.4 && sunUp) fog.color.lerp(new THREE.Color(0xe6a27a), (warm - 0.4) * 0.7 * day);
     fog.density = this.weather === 'rain' ? 0.0042 : cloudy ? 0.0016 : 0.0009;
-    this.renderer.toneMappingExposure = this.indoor ? 1.0 : 0.95 + this.night * 0.55;
+    this.renderer.toneMappingExposure = this.indoor ? 0.78 : 0.95 + this.night * 0.55;
 
     // clouds
     const cu = (this.clouds.material as THREE.ShaderMaterial).uniforms;
