@@ -12,6 +12,8 @@ type WheelId = 'FL' | 'FR' | 'RL' | 'RR';
 interface Part { geo: THREE.BufferGeometry; mat: THREE.Material; role: 'paint' | 'rim' | 'brake' | 'head' | 'plain' }
 interface Template {
   body: Part[];
+  /** Hinged doors (driver = L, passenger = R): parts are relative to the hinge pivot. */
+  doors: Record<'L' | 'R', { pivot: THREE.Vector3; parts: Part[] }>;
   wheels: Record<WheelId, { center: THREE.Vector3; parts: Part[] }>;
   size: THREE.Vector3;
 }
@@ -70,16 +72,23 @@ async function loadTemplate(file: string): Promise<Template> {
   const g = await new GLTFLoader().loadAsync((import.meta.env.BASE_URL ?? '/') + 'assets/cars/' + file);
   g.scene.updateMatrixWorld(true);
   const body = new Map<THREE.Material, THREE.BufferGeometry[]>();
+  const doorGeos: Record<'L' | 'R', Map<THREE.Material, THREE.BufferGeometry[]>> = { L: new Map(), R: new Map() };
+  const pivots: Record<'L' | 'R', THREE.Vector3> = { L: new THREE.Vector3(), R: new THREE.Vector3() };
+  g.scene.traverse((o) => { const m = /^BodyDoor(L|R)Color1$/.exec(o.name); if (m) o.getWorldPosition(pivots[m[1] as 'L' | 'R']); });
   const wheelGeos: Record<WheelId, Map<THREE.Material, THREE.BufferGeometry[]>> = { FL: new Map(), FR: new Map(), RL: new Map(), RR: new Map() };
   const wheelBox: Record<WheelId, THREE.Box3> = { FL: new THREE.Box3(), FR: new THREE.Box3(), RL: new THREE.Box3(), RR: new THREE.Box3() };
   g.scene.traverse((o) => {
     const mesh = o as THREE.Mesh;
     if (!mesh.isMesh) return;
-    let p: THREE.Object3D | null = mesh, wid: WheelId | null = null;
-    while (p) { const m = /^Wheel(Front|Rear)(L|R)/.exec(p.name); if (m) { wid = ((m[1] === 'Front' ? 'F' : 'R') + m[2]) as WheelId; break; } p = p.parent; }
+    let p: THREE.Object3D | null = mesh, wid: WheelId | null = null, door: 'L' | 'R' | null = null;
+    while (p) {
+      const m = /^Wheel(Front|Rear)(L|R)/.exec(p.name); if (m) { wid = ((m[1] === 'Front' ? 'F' : 'R') + m[2]) as WheelId; break; }
+      const d = /^BodyDoor(L|R)Color1$/.exec(p.name); if (d) { door = d[1] as 'L' | 'R'; break; }
+      p = p.parent;
+    }
     const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
     const geo = plain(mesh.geometry, mesh.matrixWorld);
-    const target = wid ? wheelGeos[wid] : body;
+    const target = wid ? wheelGeos[wid] : door ? doorGeos[door] : body;
     if (wid) { geo.computeBoundingBox(); wheelBox[wid].union(geo.boundingBox!); }
     const m = mats[0];
     if (!target.has(m)) target.set(m, []);
@@ -97,7 +106,7 @@ async function loadTemplate(file: string): Promise<Template> {
     const c = wheelBox[id].getCenter(new THREE.Vector3());
     wheels[id] = { center: c, parts: merge(wheelGeos[id], c) };
   }
-  return { body: merge(body), wheels, size };
+  return { body: merge(body), wheels, size, doors: { L: { pivot: pivots.L, parts: merge(doorGeos.L, pivots.L) }, R: { pivot: pivots.R, parts: merge(doorGeos.R, pivots.R) } } };
 }
 
 /** Near (28k tris) and far (7.5k tris) levels of detail. */
@@ -136,6 +145,11 @@ export interface FleetCar {
   brake: THREE.MeshStandardMaterial; head: THREE.MeshStandardMaterial;
   style: (typeof STYLE)[string];
   lastSeen: number;
+  /** Half extents for on-foot collision (local X = width, Z = length). */
+  half: { w: number; l: number };
+  body: string;
+  /** Door opening 0 (shut) .. 1 (open) for the driver (L) and passenger (R) side. */
+  door: { L: number; R: number };
 }
 
 export function carDims(body: string) {
@@ -144,7 +158,7 @@ export function carDims(body: string) {
   const fl = t.wheels.FL.center, rl = t.wheels.RL.center;
   return {
     L: t.size.z * st.s[2], W: 1.96 * st.s[0], wheelR: 0.38 * st.wheel * st.s[1] ** 0.3, wheelbase: (fl.z - rl.z) * st.s[2],
-    seat: new THREE.Vector3(0.38 * st.s[0], 0.3 * st.s[1] + st.lift, -0.25 * st.s[2]),
+    seat: new THREE.Vector3(0.38 * st.s[0], -0.1 * st.s[1] + st.lift * 1.5, -0.3 * st.s[2]),
   };
 }
 
@@ -169,6 +183,9 @@ export function makeFleetCar(body: string, color: string, rims: string): FleetCa
     paint: new THREE.Color(color), rim: new THREE.Color(RIM[rims] ?? RIM.steel),
     brake: new THREE.MeshStandardMaterial({ emissiveIntensity: 0.4 }), head: new THREE.MeshStandardMaterial({ emissiveIntensity: 0.4 }),
     lastSeen: performance.now(),
+    half: { w: carDims(body).W / 2, l: carDims(body).L / 2 },
+    body,
+    door: { L: 0, R: 0 },
   };
   fleet.add(car);
   return car;
@@ -179,12 +196,13 @@ export const WHEEL_SPIN_AXIS = 'x' as const;
 
 class Fleet {
   group = new THREE.Group();
-  private cars: FleetCar[] = [];
-  private meshes: { im: THREE.InstancedMesh; part: Part; wheel: WheelId | null; lod: number }[] = [];
+  cars: FleetCar[] = [];
+  private meshes: { im: THREE.InstancedMesh; part: Part; wheel: WheelId | null; lod: number; door?: 'L' | 'R' }[] = [];
   private cap = 0;
   private m = new THREE.Matrix4();
   private m2 = new THREE.Matrix4();
   private m3 = new THREE.Matrix4();
+  private m4 = new THREE.Matrix4();
   private p = new THREE.Vector3();
   private col = new THREE.Color();
   /** Cars closer than this use the detailed model. */
@@ -200,7 +218,7 @@ class Fleet {
     this.meshes = [];
     this.cap = cap;
     [template!, templateFar!].forEach((t, lod) => {
-      const mk = (part: Part, wheel: WheelId | null) => {
+      const mk = (part: Part, wheel: WheelId | null, door?: 'L' | 'R') => {
         const im = new THREE.InstancedMesh(part.geo, part.mat, cap);
         im.frustumCulled = false;
         im.castShadow = lod === 0;
@@ -208,12 +226,50 @@ class Fleet {
         im.count = 0;
         if (part.role !== 'plain') im.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(cap * 3).fill(1), 3);
         this.group.add(im);
-        this.meshes.push({ im, part, wheel, lod });
+        this.meshes.push({ im, part, wheel, lod, door });
       };
       for (const p of t.body) mk(p, null);
+      for (const d of ['L', 'R'] as const) for (const p of t.doors[d].parts) mk(p, null, d);
       for (const id of ['FL', 'FR', 'RL', 'RR'] as WheelId[]) for (const p of t.wheels[id].parts) mk(p, id);
     });
   }
+
+  /** Push a circle (at `pos`, radius r) out of every nearby car's oriented box, optionally ignoring one car. */
+  push(pos: THREE.Vector3, r: number, ignore?: THREE.Object3D) {
+    let moved = false;
+    for (const c of this.cars) {
+      if (!c.root.parent || !c.root.visible || c.root === ignore) continue;
+      const cp = c.root.getWorldPosition(this.p);
+      const dx = pos.x - cp.x, dz = pos.z - cp.z;
+      if (dx * dx + dz * dz > 36) continue;
+      const yaw = c.root.getWorldQuaternion(this.q).y === 0 && this.q.w === 1 ? 0 : new THREE.Euler().setFromQuaternion(this.q, 'YXZ').y;
+      const cs = Math.cos(yaw), sn = Math.sin(yaw);
+      // into car-local space (car forward = +Z)
+      const lx = dx * cs - dz * sn, lz = dx * sn + dz * cs;
+      const hw = c.half.w * 0.92 + r, hl = c.half.l * 0.95 + r;
+      if (Math.abs(lx) >= hw || Math.abs(lz) >= hl) continue;
+      let px = 0, pz = 0;
+      if (hw - Math.abs(lx) < hl - Math.abs(lz)) px = Math.sign(lx || 1) * (hw - Math.abs(lx)); else pz = Math.sign(lz || 1) * (hl - Math.abs(lz));
+      // back to world
+      pos.x += px * cs + pz * sn;
+      pos.z += -px * sn + pz * cs;
+      moved = true;
+    }
+    return moved;
+  }
+
+  /** Nearest visible car within `maxDist` of `pos`. */
+  nearest(pos: THREE.Vector3, maxDist: number) {
+    let best: FleetCar | null = null, bd = maxDist * maxDist;
+    for (const c of this.cars) {
+      if (!c.root.parent || !this.visible(c.root)) continue;
+      const d = c.root.getWorldPosition(this.p).distanceToSquared(pos);
+      if (d < bd) { bd = d; best = c; }
+    }
+    return best;
+  }
+
+  private q = new THREE.Quaternion();
 
   private visible(o: THREE.Object3D) {
     let p: THREE.Object3D | null = o;
@@ -235,9 +291,15 @@ class Fleet {
       if (d2 > maxDist * maxDist) continue;
       const lod = d2 < this.nearDist * this.nearDist ? 0 : 1;
       const i = n[lod]++;
-      for (const { im, part, wheel, lod: l } of this.meshes) {
+      const tpl = lod === 0 ? template! : templateFar!;
+      for (const { im, part, wheel, lod: l, door } of this.meshes) {
         if (l !== lod) continue;
-        if (wheel) {
+        if (door) {
+          const pv = tpl.doors[door].pivot;
+          const ang = (door === 'L' ? -1.05 : 1.05) * c.door[door];
+          this.m.copy(c.root.matrixWorld).multiply(this.m2.makeScale(c.style.s[0], c.style.s[1], c.style.s[2]).setPosition(0, c.style.lift, 0))
+            .multiply(this.m3.makeTranslation(pv.x, pv.y, pv.z)).multiply(this.m4.makeRotationY(ang));
+        } else if (wheel) {
           // vehicle code spins wheels via spin.rotation.z (procedural convention); our axles run along X
           const w = c.wheels[wheelIdx[wheel]];
           this.m.copy(w.holder.matrixWorld).multiply(this.m2.makeRotationX(-w.spin.rotation.z)).multiply(this.m3.makeScale(c.style.wheel, c.style.wheel, c.style.wheel));

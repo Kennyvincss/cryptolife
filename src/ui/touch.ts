@@ -64,15 +64,21 @@ export function mountTouch(input: Input, actions: { phone: () => void; map: () =
     const t = e.changedTouches[0];
     lid = t.identifier; const p = toApp(t.clientX, t.clientY); lx = p.x; ly = p.y;
   }, { passive: false });
+  // two fingers on the look area: pinch to zoom the camera
+  let pinch = 0;
+  const pinchDist = (e: TouchEvent) => { const ts = Array.from(e.touches).filter((t) => look.contains(t.target as Node)); if (ts.length < 2) return 0; const a = toApp(ts[0].clientX, ts[0].clientY), b = toApp(ts[1].clientX, ts[1].clientY); return Math.hypot(a.x - b.x, a.y - b.y); };
   look.addEventListener('touchmove', (e) => {
     e.preventDefault();
+    const pd = pinchDist(e);
+    if (pd) { if (pinch) input.wheel += (pinch - pd) / 45; pinch = pd; return; }
+    pinch = 0;
     for (const t of Array.from(e.changedTouches)) if (t.identifier === lid) {
       const p = toApp(t.clientX, t.clientY);
       input.addLook((p.x - lx) * 1.6, (p.y - ly) * 1.6);
       lx = p.x; ly = p.y;
     }
   }, { passive: false });
-  look.addEventListener('touchend', () => (lid = null));
+  look.addEventListener('touchend', () => { lid = null; pinch = 0; });
 
   // hide the controls while a full-screen UI is open
   const tick = () => { const b = actions.blocked(); for (const el of [joy, pad, look, bar]) el.style.display = b ? 'none' : ''; if (b) release(); requestAnimationFrame(tick); };

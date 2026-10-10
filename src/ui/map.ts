@@ -13,9 +13,11 @@ export const ICONS: Partial<Record<InteriorKind, string>> = {
 const PAD = 60;
 const minX = ROAD_X[0] - PAD, maxX = ROAD_X[ROAD_X.length - 1] + PAD;
 const minZ = ROAD_Z[0] - PAD, maxZ = ROAD_Z[ROAD_Z.length - 1] + PAD;
-const SCALE = 2; // px per meter in the base canvas
+const SCALE = 4; // px per meter in the base canvas (sharp when zoomed in on the big map)
 
 let base: HTMLCanvasElement | null = null;
+/** Base map image and its world placement, for the interactive map. */
+export const mapBase = () => ({ img: base, minX, minZ, maxX, maxZ, scale: SCALE });
 
 export function buildBaseMap(city: CityBuild) {
   const c = document.createElement('canvas');

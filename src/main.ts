@@ -14,6 +14,7 @@ import { Environment } from './engine/sky.js';
 import { Humanoid, randomLook, type Anim } from './entities/humanoid.js';
 import { loadRigs } from './entities/rig.js';
 import { fleet, loadCarModel } from './entities/carmodel.js';
+import { CarEntry } from './systems/carentry.js';
 import { Car } from './entities/vehicle.js';
 import { act, connect, detectMode, sendPos, tokenKey } from './net/client.js';
 import { emit, gameMinutes, on, store, timeOverride } from './state.js';
@@ -55,9 +56,9 @@ let traffic!: Traffic;
 let peds!: Pedestrians;
 scene.add(fleet.group);
 function populate() {
-  traffic = new Traffic(R.quality === 'low' ? 12 : 22);
+  traffic = new Traffic(R.quality === 'low' ? 16 : 26);
   scene.add(traffic.group);
-  peds = new Pedestrians(R.quality === 'low' ? 16 : 30);
+  peds = new Pedestrians(R.quality === 'low' ? 22 : 40);
   scene.add(peds.group);
   city.populateParked();
 }
@@ -74,6 +75,7 @@ scene.add(headlight, headlight.target);
 
 let hud: HUD;
 let player: PlayerController;
+let carEntry: CarEntry;
 let body: Humanoid;
 let zone = 'street';
 let interior: InteriorBuild | null = null;
@@ -168,14 +170,32 @@ function spawnMyCar(uid: string, near?: THREE.Vector3) {
   myCar.onImpact = (s) => { if (s > 6) audio.sfx('error'); };
   scene.add(myCar.root);
 }
+/** Instantly put the player in the driver's seat (used after the get-in sequence). */
 function enterCar(car: Car) {
   player.car = car;
   player.mode = 'drive';
-  player.stand();
-  player.mode = 'drive';
-  audio.sfx('door');
   if (music.playing) music.setOutput('car');
 }
+/** Walk to the door, open it, get in, close it, then drive. */
+function getIn(car: Car) {
+  if (carEntry.busy) return;
+  player.stand();
+  carEntry.enter(car, () => enterCar(car));
+}
+/** Stop, open the door, get out, close it. */
+function getOut() {
+  const c = player.car;
+  if (!c || carEntry.busy) return;
+  player.car = null;
+  audio.engineSound(false);
+  carEntry.exit(c, () => {
+    const p = carEntry.exitPoint(c);
+    player.mode = 'walk';
+    player.teleport(p.setY(city.groundAt(p.x, p.z)), c.heading);
+    if (music.output === 'car') music.setOutput('headphones');
+  });
+}
+/** Instant exit (forced: test drive ended, zone change…). */
 function leaveCar() {
   const c = player.car;
   if (!c) return;
@@ -187,6 +207,48 @@ function leaveCar() {
   audio.engineSound(false);
   audio.sfx('door');
   if (music.output === 'car') music.setOutput('headphones');
+}
+
+/** Cars the player took from the street (parked or traffic); left where they were parked. */
+const borrowed: Car[] = [];
+function keepBorrowed(car: Car) {
+  if (!borrowed.includes(car)) borrowed.push(car);
+  while (borrowed.length > 5) {
+    const i = borrowed.findIndex((b) => b !== player.car && b.pos.distanceTo(player.pos) > 40);
+    if (i < 0) break;
+    borrowed[i].dispose(); borrowed.splice(i, 1);
+  }
+}
+/** Something on the street the player can get into: own car, test car, a parked car or stopped traffic. */
+function nearestEnterable(): { label: string; go: () => void } | null {
+  const me = player.pos;
+  const cands: { d: number; label: string; go: () => void }[] = [];
+  if (myCar) cands.push({ d: myCar.pos.distanceTo(me) - 2, label: `Get in your ${VEHICLE_BY_ID[myCar.model].name}`, go: () => getIn(myCar!) });
+  if (testCar) cands.push({ d: testCar.car.pos.distanceTo(me) - 1, label: 'Get in (test drive)', go: () => getIn(testCar!.car) });
+  for (const b of borrowed) cands.push({ d: b.pos.distanceTo(me), label: 'Get in car', go: () => getIn(b) });
+  for (let i = 0; i < city.parkedCars.length; i++) {
+    const pc = city.parkedCars[i];
+    cands.push({ d: pc.root.position.distanceTo(me), label: 'Get in parked car', go: () => {
+      const car = new Car(pc.model, pc.color);
+      car.setPose(pc.root.position.x, pc.root.position.z, pc.root.rotation.y);
+      pc.root.removeFromParent();
+      city.parkedCars.splice(city.parkedCars.indexOf(pc), 1);
+      scene.add(car.root);
+      keepBorrowed(car);
+      getIn(car);
+    } });
+  }
+  const tc = traffic?.stoppedNear(me, 4.2);
+  if (tc) cands.push({ d: tc.pos.distanceTo(me), label: 'Take this car (driver gets out)', go: () => {
+    traffic.take(tc);
+    scene.add(tc.root);
+    const side = new THREE.Vector3(1.6, 0, -0.4).applyAxisAngle(new THREE.Vector3(0, 1, 0), tc.heading).add(tc.pos);
+    peds?.spawnAt(side.setY(0.15), player.pos);
+    keepBorrowed(tc);
+    getIn(tc);
+  } });
+  const best = cands.filter((c) => c.d < 3.6).sort((a, b) => a.d - b.d)[0];
+  return best ?? null;
 }
 
 // ------------------------------------------------------------------ api
@@ -292,13 +354,15 @@ function start() {
   lookKey = JSON.stringify(me.look);
   scene.add(body.root);
   player = new PlayerController(body, R.camera);
+  carEntry = new CarEntry(player, (n) => audio.sfx(n));
   player.teleport(new THREE.Vector3(...PLAYER_SPAWN).setY(0.15), Math.PI / 2);
   hud = new HUD();
-  hud.onMapClick = (x, z) => setWaypoint(x, z, 'Map marker');
+  hud.onMapClick = (x, z, label) => setWaypoint(x, z, label ?? 'Map marker');
+  hud.onClearWaypoint = () => { waypoint = null; beacon.visible = false; toast('GPS destination cleared', 'ok'); };
   hud.onPromptTap = (k) => (k === 'W' ? player.stand() : input.tap('Key' + k));
   if (isTouchDevice()) {
     mountTouch(input, { phone: () => hud.togglePhone(), map: () => hud.toggleMap(), chat: () => hud.openChat(), blocked: () => hud.panelOpen || hud.mapOpen || hud.phoneOpen || hud.chatOpen });
-    player.camDist = 6.5;
+    player.camDist = 3.6;
     enableLandscape();
     R.camera.far = 1300; R.camera.updateProjectionMatrix();
     if (window.innerHeight > window.innerWidth) toast('Turn your phone sideways to play in landscape.', 'ok');
@@ -332,7 +396,7 @@ function start() {
   requestAnimationFrame(loop);
   // debug handle (used by automated browser checks)
   (window as any).cc = {
-    player, scene, R, env, city, store, hud, interact, fleet, get traffic() { return traffic; }, get peds() { return peds; },
+    player, scene, R, env, city, store, hud, interact, fleet, get carEntry() { return carEntry; }, get traffic() { return traffic; }, get peds() { return peds; },
     get interior() { return interior; }, get zone() { return zone; },
     tp(z: string) { const d = city.doors.find((x) => x.zone === z); if (d) player.teleport(d.pos.clone().add(new THREE.Vector3(Math.sin(d.facing) * 2, 0, Math.cos(d.facing) * 2)), d.facing + Math.PI); },
     time(m: number | null) { timeOverride.minutes = m; },
@@ -536,12 +600,14 @@ function loop(now: number) {
   let fAction: (() => void) | null = null;
   let gAction: (() => void) | null = null;
   if (zone === 'street') {
-    if (player.mode === 'drive') { extra.push('F Exit vehicle'); fAction = () => { const c = player.car; leaveCar(); if (c && testCar?.car === c) { /* test car stays until timer */ } }; }
+    if (player.mode === 'drive') { extra.push(Math.abs(player.car?.speed ?? 0) > 1 ? 'F Stop & get out' : 'F Get out'); fAction = () => getOut(); }
     else if (player.mode === 'walk' || player.mode === 'seated') {
       const r = store.me?.ride;
       if (rideCar && r?.status === 'arrived' && rideCar.car.pos.distanceTo(player.pos) < 6.5) { extra.push('F Get in your CityRide'); fAction = () => run(act('ride.board')); }
-      else if (myCar && myCar.pos.distanceTo(player.pos) < 6.5) { extra.push(`F Drive ${VEHICLE_BY_ID[myCar.model].name}`); fAction = () => enterCar(myCar!); }
-      else if (testCar && testCar.car.pos.distanceTo(player.pos) < 6.5) { extra.push('F Test drive'); fAction = () => enterCar(testCar!.car); }
+      else {
+        const en = nearestEnterable();
+        if (en) { extra.push('F ' + en.label); fAction = en.go; }
+      }
     }
   }
   const near = player.mode === 'walk' ? remotes.nearest(player.pos, zone, 2.6) : null;
@@ -558,8 +624,25 @@ function loop(now: number) {
   const groundAt = zone === 'street' ? city.groundAt : () => (interior ? 0 : 0);
   const colliders = zone === 'street' ? city.colliders : interior!.colliders;
   player.update(dt, input, colliders, groundAt, uiBlocked);
+  // cars are solid on foot (parked, traffic, showroom)
+  if (player.mode === 'walk') {
+    fleet.push(player.pos, 0.38);
+    if (zone === 'street' && peds) peds.push(player.pos, 0.35);
+    body.root.position.copy(player.pos);
+  }
+  carEntry.update(dt);
   if (player.mode === 'drive' && player.car) {
     const c = player.car;
+    // other cars (parked, traffic, showroom) are solid
+    const fwd = new THREE.Vector3(Math.sin(c.heading), 0, Math.cos(c.heading));
+    for (const off of [-c.visual.dims.L * 0.33, 0, c.visual.dims.L * 0.33]) {
+      const pt = c.pos.clone().addScaledVector(fwd, off), before = pt.clone();
+      if (fleet.push(pt, c.visual.dims.W * 0.45, c.root)) {
+        c.pos.x += pt.x - before.x; c.pos.z += pt.z - before.z;
+        const imp = Math.abs(c.speed); if (imp > 3) { c.damageAccum += imp * 0.5; audio.sfx('error'); }
+        c.speed *= -0.25; c.sync();
+      }
+    }
     const hit = traffic.collide(c.pos, c.radius);
     if (hit) { c.pos.x += hit.dx; c.pos.z += hit.dz; const imp = Math.abs(c.speed); if (imp > 3) { c.damageAccum += imp * 0.6; audio.sfx('error'); } c.speed *= -0.3; c.sync(); }
     audio.engineSound(true, c.rpm, !!c.def.electric);
@@ -604,8 +687,10 @@ function loop(now: number) {
     } else for (const l of pool) l.intensity = 0;
     traffic.setHeadlights(night > 0.4);
     const obstacles = [{ pos: player.mode === 'drive' && player.car ? player.car.pos : player.pos, r: player.mode === 'drive' ? 1 : 0.4 }];
-    traffic.update(dt, t, focus, obstacles, () => audio.sfx('horn'));
-    peds.update(dt, R.camera.position, player.pos, player.car ? { pos: player.car.pos, speed: player.car.speed } : null);
+    const camDir = R.camera.getWorldDirection(new THREE.Vector3()).setY(0).normalize();
+    traffic.update(dt, t, focus, obstacles, () => audio.sfx('horn'), camDir);
+    traffic.updateDrivers(dt, R.camera.position);
+    peds.update(dt, R.camera.position, player.pos, player.car ? { pos: player.car.pos, speed: player.car.speed } : null, camDir);
   }
   if (player.car) {
     const on = headlightsOn || night > 0.45;

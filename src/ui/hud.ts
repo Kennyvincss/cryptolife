@@ -11,7 +11,8 @@ import { labelOf } from '../systems/interact.js';
 import { APP_BY_ID, APPS, type AppCtx } from './apps.js';
 import { run, toast } from './components.js';
 import { SIM, add, h, view } from './dom.js';
-import { drawFullMap, drawMinimap, type MapMarks } from './map.js';
+import { drawMinimap, type MapMarks } from './map.js';
+import { MapView } from './mapview.js';
 import { PANELS } from './panels.js';
 import { view as vp } from './orient.js';
 
@@ -45,7 +46,9 @@ export class HUD {
   panelOpen = false;
   mapOpen = false;
   chatOpen = false;
-  onMapClick?: (x: number, z: number) => void;
+  onMapClick?: (x: number, z: number, label?: string) => void;
+  onClearWaypoint?: () => void;
+  mapView!: MapView;
   onPromptTap?: (key: string) => void;
   mapMarks: () => MapMarks = () => ({ player: { x: 0, z: 0, heading: 0 } });
 
@@ -56,6 +59,7 @@ export class HUD {
     this.moneyEl = h('div.hud-money');
     this.promptsEl = h('div.hud-prompts');
     this.mini = h('canvas.minimap', { width: 220, height: 220 }) as HTMLCanvasElement;
+    this.mini.addEventListener('click', () => this.toggleMap(true));
     this.miniCtx = this.mini.getContext('2d')!;
     this.locEl = h('div.hud-loc');
     this.speedEl = h('div.hud-speed');
@@ -88,7 +92,12 @@ export class HUD {
     this.panelTitle = h('div.pn-title');
     this.panelBody = h('div.pn-body.scroll');
     this.panelEl = h('div.panel', h('div.pn-head', this.panelTitle, h('button.pn-x', { onclick: () => this.closePanel() }, '✕')), this.panelBody);
-    this.mapEl = h('div.bigmap');
+    this.mapView = new MapView();
+    this.mapEl = this.mapView.el;
+    this.mapView.marks = () => this.mapMarks();
+    this.mapView.onDestination = (x, z, label) => this.onMapClick?.(x, z, label);
+    this.mapView.onClear = () => this.onClearWaypoint?.();
+    this.mapView.onClose = () => this.toggleMap(false);
     this.helpEl = h('div.help', h('h3', 'Crypto City — controls'), h('pre', 'WASD move · Shift run · Space jump\nMouse look (click the world to lock, Esc to unlock) · Wheel zoom\nE / R — interact (shown bottom-right)\nF — enter / exit vehicles, board rides\nP — phone · M — map · T — chat · H — this help\n1 wave · 2 dance · 3 phone · 4 talk · C reset camera\n\nIn a car: W/S throttle/brake/reverse · A/D steer · Space handbrake · L lights'), h('small.muted', 'Everything with money uses SIMULATED currency.'));
     this.helpEl.style.display = 'none';
 
@@ -230,28 +239,10 @@ export class HUD {
   // ---------------- map ----------------
   toggleMap(open = !this.mapOpen) {
     this.mapOpen = open;
-    this.mapEl.style.display = open ? 'block' : 'none';
-    if (open) this.renderMap(true);
+    if (open) this.mapView.show(); else this.mapView.hide();
     emit('ui', open);
   }
-  private mapCanvas: HTMLCanvasElement | null = null;
-  private toWorld: ((x: number, y: number) => { x: number; z: number }) | null = null;
-  renderMap(init = false) {
-    if (init || !this.mapCanvas) {
-      this.mapEl.innerHTML = '';
-      this.mapCanvas = h('canvas', { width: Math.min(1100, vp.w - 40), height: Math.min(820, vp.h - 90) }) as HTMLCanvasElement;
-      this.mapCanvas.addEventListener('click', (e) => {
-        if (!this.toWorld) return;
-        // offsetX/Y are in the canvas's own (possibly rotated) coordinate space
-        const c = this.mapCanvas!;
-        const w = this.toWorld(e.offsetX * (c.width / c.clientWidth), e.offsetY * (c.height / c.clientHeight));
-        this.onMapClick?.(w.x, w.z);
-      });
-      add(this.mapEl, h('div.mh', h('b', 'CRYPTO CITY'), h('span.muted', ' — click to set a GPS waypoint · M to close'), h('button.pn-x', { onclick: () => this.toggleMap(false) }, '✕')), this.mapCanvas,
-        h('div.legend', Object.values(DISTRICTS).map((d) => h('span', h('i', { style: { background: d.color } }), d.name))));
-    }
-    this.toWorld = drawFullMap(this.mapCanvas.getContext('2d')!, this.mapCanvas.width, this.mapCanvas.height, this.mapMarks());
-  }
+  renderMap() { this.mapView.draw(); }
 
   toggleHelp() { this.helpEl.style.display = this.helpEl.style.display === 'none' ? 'block' : 'none'; }
 

@@ -7,7 +7,7 @@ import { Humanoid } from '../entities/humanoid.js';
 import type { Car } from '../entities/vehicle.js';
 import type { Colliders } from '../world/colliders.js';
 
-export type Mode = 'walk' | 'seated' | 'drive' | 'passenger' | 'lying';
+export type Mode = 'walk' | 'seated' | 'drive' | 'passenger' | 'lying' | 'script';
 
 export class PlayerController {
   pos = new THREE.Vector3();
@@ -18,8 +18,10 @@ export class PlayerController {
   speed = 0;
   car: Car | null = null;
   camYaw = 0;
-  camPitch = 0.28;
-  camDist = 5.5;
+  camPitch = 0.16;
+  camDist = 3.3;
+  /** Over-the-shoulder offset (metres to the right of the character). */
+  shoulder = 0.42;
   private camPos = new THREE.Vector3();
   private camLook = new THREE.Vector3();
   private emote: { anim: Anim; until: number } | null = null;
@@ -28,6 +30,8 @@ export class PlayerController {
   onStand?: () => void;
   firstPerson = false;
   camBounds: { minX: number; maxX: number; minZ: number; maxZ: number; maxY: number } | null = null;
+  /** Pose driven by a scripted sequence (getting in / out of cars). */
+  script = { pos: new THREE.Vector3(), heading: 0, anim: 'idle' as Anim, speed: 0, camHeight: 1.4, camDist: 0 };
 
   constructor(public body: Humanoid, public camera: THREE.PerspectiveCamera) {}
 
@@ -82,6 +86,17 @@ export class PlayerController {
     const fwd = (input.down('KeyW') || input.down('ArrowUp') ? 1 : 0) - (input.down('KeyS') || input.down('ArrowDown') ? 1 : 0);
     const strafe = (input.down('KeyD') || input.down('ArrowRight') ? 1 : 0) - (input.down('KeyA') || input.down('ArrowLeft') ? 1 : 0);
     const moving = !uiBlocked && (fwd !== 0 || strafe !== 0);
+
+    if (this.mode === 'script') {
+      const sc = this.script;
+      this.pos.copy(sc.pos).setY(0);
+      this.heading = sc.heading;
+      this.body.root.position.copy(sc.pos);
+      this.body.root.rotation.set(0, sc.heading, 0);
+      this.body.update(dt, sc.anim, sc.speed);
+      this.updateCamera(dt, colliders, sc.camHeight, sc.camDist || this.camDist);
+      return;
+    }
 
     if (this.mode === 'seated' || this.mode === 'lying') {
       if (moving || input.pressed('Space')) this.stand();
@@ -164,7 +179,7 @@ export class PlayerController {
     this.body.root.rotation.set(0, this.heading, 0);
     this.body.update(dt, this.anim, this.speed);
     if (em === 'phone') this.body.phone.visible = true;
-    this.updateCamera(dt, colliders, 1.55);
+    this.updateCamera(dt, colliders, 1.5);
   }
 
   snapCamera() { this.updateCamera(1, null, 1.55); }
@@ -172,6 +187,12 @@ export class PlayerController {
   private updateCamera(dt: number, colliders: Colliders | null, height: number, dist = this.camDist) {
     const look = new THREE.Vector3(this.body.root.position.x, this.body.root.position.y + height, this.body.root.position.z);
     if (this.mode === 'drive' && this.car) look.set(this.car.pos.x, this.car.pos.y + height, this.car.pos.z);
+    else if (this.mode === 'walk' && dist < 6) {
+      // GTA-style framing: look past the character's right shoulder
+      const s = this.shoulder * THREE.MathUtils.clamp((6 - dist) / 3, 0, 1);
+      look.x += Math.cos(this.camYaw) * s;
+      look.z -= Math.sin(this.camYaw) * s;
+    }
     const dir = new THREE.Vector3(Math.sin(this.camYaw) * Math.cos(this.camPitch), Math.sin(this.camPitch), Math.cos(this.camYaw) * Math.cos(this.camPitch));
     let d = dist;
     if (colliders) {

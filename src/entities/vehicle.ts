@@ -102,6 +102,8 @@ export interface VehicleVisual {
   seat: THREE.Vector3;
   dims: { L: number; W: number; wheelR: number; wheelbase: number };
   isMoto: boolean;
+  /** Animated door openings (glTF cars only). */
+  doors?: { L: number; R: number };
 }
 
 export function buildVehicle(model: string, color: string, rims = 'steel'): VehicleVisual {
@@ -111,7 +113,7 @@ export function buildVehicle(model: string, color: string, rims = 'steel'): Vehi
     // realistic glTF car drawn by the instanced fleet renderer
     const fc = makeFleetCar(def.body, color, rims);
     const d = carDims(def.body);
-    return { root: fc.root, wheels: fc.wheels.map((w) => ({ holder: w.holder, spin: w.spin, front: w.front })), brake: fc.brake, head: fc.head, seat: d.seat, dims: { L: d.L, W: d.W, wheelR: d.wheelR, wheelbase: d.wheelbase }, isMoto: false };
+    return { root: fc.root, wheels: fc.wheels.map((w) => ({ holder: w.holder, spin: w.spin, front: w.front })), brake: fc.brake, head: fc.head, seat: d.seat, dims: { L: d.L, W: d.W, wheelR: d.wheelR, wheelbase: d.wheelbase }, isMoto: false, doors: fc.door };
   }
   const d = DIMS[def.body];
   const root = new THREE.Group();

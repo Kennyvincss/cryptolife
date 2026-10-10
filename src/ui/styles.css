@@ -329,3 +329,30 @@ body.land .help { max-width: 90%; font-size: 12px; }
   .login-card .logo { font-size: 24px; }
   .login-card .tag { margin: 0; }
 }
+
+/* ---------- full-screen interactive map ---------- */
+.mapview { position: fixed; inset: 0; z-index: 70; background: #0d1410; pointer-events: auto; }
+.mv-canvas { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; cursor: grab; }
+.mv-side { position: absolute; left: 12px; top: 12px; bottom: 12px; width: 300px; display: flex; flex-direction: column; gap: 8px; background: rgba(10,12,20,0.82); backdrop-filter: blur(8px); border: 1px solid var(--line); border-radius: 16px; padding: 12px; }
+.mv-title { display: flex; justify-content: space-between; align-items: center; letter-spacing: 0.15em; }
+.mv-x { background: none; border: none; color: #fff; font-size: 20px; cursor: pointer; padding: 4px 8px; }
+.mv-search { width: 100%; padding: 9px 12px; border-radius: 10px; border: 1px solid var(--line); background: rgba(255,255,255,0.06); color: #fff; font-size: 14px; box-sizing: border-box; }
+.mv-list { overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 4px; -webkit-overflow-scrolling: touch; }
+.mv-item { display: flex; gap: 10px; align-items: center; padding: 8px; border-radius: 10px; cursor: pointer; }
+.mv-item:hover, .mv-item:active { background: rgba(255,255,255,0.08); }
+.mv-item b { display: block; font-size: 13px; }
+.mv-item small { color: var(--muted); font-size: 11px; }
+.mv-ic { font-size: 22px; width: 32px; text-align: center; }
+.mv-tools { position: absolute; right: 14px; top: 50%; transform: translateY(-50%); display: flex; flex-direction: column; gap: 8px; }
+.mv-btn { width: 48px; height: 48px; border-radius: 50%; border: 1px solid var(--line); background: rgba(10,12,20,0.82); color: #fff; font-size: 24px; cursor: pointer; }
+.mv-card { position: absolute; left: 50%; bottom: 18px; transform: translateX(-30%); display: none; align-items: center; gap: 12px; background: rgba(10,12,20,0.9); border: 1px solid var(--line); border-radius: 16px; padding: 12px 14px; max-width: min(560px, 70vw); }
+.mv-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.mv-info small { color: var(--muted); font-size: 12px; }
+.mv-act { background: #b46bff; color: #fff; border: none; border-radius: 10px; padding: 10px 14px; font-weight: 700; cursor: pointer; white-space: nowrap; }
+.mv-act.ghost { background: rgba(255,255,255,0.1); }
+@media (max-height: 520px), (max-width: 700px) {
+  .mv-side { width: 210px; padding: 8px; top: 8px; bottom: 8px; left: 8px; }
+  .mv-card { bottom: 8px; transform: translateX(-20%); padding: 8px 10px; }
+  .mv-act { padding: 8px 10px; }
+}
+.minimap { cursor: pointer; }

@@ -36,6 +36,8 @@ export interface CityBuild {
   trees: TreeSpot[];
   /** Places the parked cars (call after the car model loads). */
   populateParked: () => void;
+  /** Parked cars on the street (anyone can get in and drive them off). */
+  parkedCars: { model: string; color: string; root: THREE.Object3D }[];
   footprints: { x: number; z: number; w: number; d: number; h: number; district: DistrictId; feature?: string }[];
 }
 
@@ -68,6 +70,7 @@ export function buildCity(lowQuality = false): CityBuild {
   const R = rng(1234);
   const trees: TreeSpot[] = [];
   const parked: { model: string; color: string; x: number; z: number; rot: number }[] = [];
+  const parkedCars: { model: string; color: string; root: THREE.Object3D }[] = [];
   // shared street-furniture geometry (built once, merged many times)
   const SF = (() => {
     const poleProfile = [new THREE.Vector2(0.15, 0), new THREE.Vector2(0.15, 0.06), new THREE.Vector2(0.12, 0.1), new THREE.Vector2(0.115, 0.5), new THREE.Vector2(0.095, 0.55), new THREE.Vector2(0.07, 8.0), new THREE.Vector2(0.0, 8.0)];
@@ -428,6 +431,8 @@ export function buildCity(lowQuality = false): CityBuild {
     B.add(new THREE.BoxGeometry(0.05, 2.95, 0.22), frameM, { x: doorC.x, y: CURB_H + 1.48, z: doorC.z }, rotY);
     for (const sx of [-0.25, 0.25]) B.add(new THREE.BoxGeometry(0.04, 0.6, 0.06), mat('chromehandle', { color: '#d8dce0', metalness: 1, roughness: 0.15 }), { x: doorC.x + along.x * sx + front.x * 0.13, y: CURB_H + 1.3, z: doorC.z + along.z * sx + front.z * 0.13 }, rotY);
     B.add(new THREE.BoxGeometry(2.7, 0.08, 0.24), glowMatNight(accent, 3), { x: doorC.x, y: CURB_H + 3.28, z: doorC.z }, rotY);
+    // the frame sticks out of the wall: make it solid
+    colliders.addBox(doorC.x + front.x * 0.05, doorC.z + front.z * 0.05, Math.abs(front.z) > 0.5 ? 2.8 : 0.35, Math.abs(front.x) > 0.5 ? 2.8 : 0.35, 'doorframe', 3.3);
     // entrance mat
     B.add(new THREE.BoxGeometry(2.2, 0.02, 1.3), mat('doormat', { color: '#24221f', roughness: 1 }), { x: doorC.x + front.x * 0.8, y: CURB_H + 0.01, z: doorC.z + front.z * 0.8 }, rotY);
     // awning
@@ -735,7 +740,6 @@ export function buildCity(lowQuality = false): CityBuild {
     if (nearDoor(rx + side * 7, z, 6)) continue;
     // created once the car model has loaded (see populateParked)
     parked.push({ model: parkModels[pc % parkModels.length], color: paints[pc++ % paints.length], x: rx + side * 6.6, z, rot: side < 0 ? 0 : Math.PI });
-    colliders.addBox(rx + side * 6.6, z, 2, 4.6, 'parked', 1.5);
   }
 
   // ---------------- distant skyline & hills ----------------
@@ -784,12 +788,14 @@ export function buildCity(lowQuality = false): CityBuild {
 
   void artTexture;
   return { group, colliders, doors, lamps, benches, nightMats, signals, screens, groundAt, footprints, ocean: coast.ocean, trees,
+    parkedCars,
     populateParked: () => {
       for (const p of parked) {
         const v = buildVehicle(p.model, p.color);
         v.root.position.set(p.x, 0, p.z);
         v.root.rotation.y = p.rot;
-        if (v.root.children.some((c) => (c as THREE.Mesh).isMesh)) { B.addObject(v.root); B.flush(group); } else group.add(v.root);
+        if (v.root.children.some((c) => (c as THREE.Mesh).isMesh)) { B.addObject(v.root); B.flush(group); colliders.addBox(p.x, p.z, 2, 4.6, 'parked', 1.5); }
+        else { group.add(v.root); parkedCars.push({ model: p.model, color: p.color, root: v.root }); }
       }
     },
   };
