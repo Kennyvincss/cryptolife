@@ -14,6 +14,7 @@ import { Environment } from './engine/sky.js';
 import { Humanoid, randomLook, type Anim } from './entities/humanoid.js';
 import { loadModel, loadRigs, modelOf } from './entities/rig.js';
 import { fleet, loadCarModel } from './entities/carmodel.js';
+import { loadFurnitureModels } from './world/furnmodels.js';
 import { CarEntry } from './systems/carentry.js';
 import { DoorWalk } from './systems/doorwalk.js';
 import { Car } from './entities/vehicle.js';
@@ -406,7 +407,7 @@ async function refreshCityLists() {
 // ------------------------------------------------------------------ boot
 async function boot() {
   setLoading('Connecting…');
-  const rigs = Promise.all([loadRigs(), loadCarModel()]); // characters, mocap and cars stream in while we connect / log in
+  const rigs = Promise.all([loadRigs(), loadCarModel(), loadFurnitureModels()]); // characters, mocap and cars stream in while we connect / log in
   await detectMode();
   loading?.classList.add('hidden');
   let token = localStorage.getItem(tokenKey());

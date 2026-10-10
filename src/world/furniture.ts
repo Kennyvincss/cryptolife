@@ -1,10 +1,12 @@
-// Furniture & fixture model library (procedural, original designs).
+// Furniture & fixture library: real models where we have them (see furnmodels.ts),
+// procedural designs for everything else and as a fallback.
 
 import * as THREE from 'three';
 import { mat, roundedBox } from '../engine/build.js';
 import { artTexture, fabric } from '../engine/textures.js';
 import { surf } from './pbr.js';
 import { houseplantParts } from './trees.js';
+import { real } from './furnmodels.js';
 void fabric;
 
 type V = number;
@@ -54,6 +56,7 @@ export const M = {
 };
 
 export function sofa(color = '#5a6270', w = 2.2) {
+  const r = real('sofa', { w }); if (r) return r;
   const g = new THREE.Group();
   const f = M.fabric(color);
   rbox(g, w, 0.42, 0.95, 0.08, f, 0, 0.28, 0);
@@ -65,6 +68,7 @@ export function sofa(color = '#5a6270', w = 2.2) {
   return g;
 }
 export function armchair(color = '#7a5a3a') {
+  const r = real('armchair'); if (r) return r;
   const g = new THREE.Group();
   const l = M.leather(color);
   rbox(g, 0.85, 0.4, 0.85, 0.08, l, 0, 0.3, 0);
@@ -74,6 +78,7 @@ export function armchair(color = '#7a5a3a') {
   return g;
 }
 export function coffeeTable() {
+  const r = real('coffeeTable'); if (r) return r;
   const g = new THREE.Group();
   box(g, 1.2, 0.05, 0.6, M.darkWood(), 0, 0.42, 0);
   box(g, 1.1, 0.03, 0.5, M.darkWood(), 0, 0.12, 0);
@@ -89,6 +94,7 @@ export function tv(size = 1.4, screen?: THREE.Material) {
   return g;
 }
 export function tvStand(w = 1.8) {
+  const r = real('tvStand', { w }); if (r) return r;
   const g = new THREE.Group();
   box(g, w, 0.45, 0.42, M.darkWood(), 0, 0.25, 0);
   box(g, w * 0.95, 0.02, 0.43, M.black(), 0, 0.2, 0.01);
@@ -122,6 +128,7 @@ export function rug(w = 2.4, d = 1.7, c = '#8a4a3a') {
   return g;
 }
 export function plant(big = false) {
+  const r = real(big ? 'plantBig' : 'plantSmall'); if (r) return r;
   const g = new THREE.Group();
   const s = big ? 1.6 : 1;
   cyl(g, 0.2 * s, 0.15 * s, 0.4 * s, M.pot(), 0, 0.2 * s, 0, 16);
@@ -147,6 +154,13 @@ export function bed(w = 1.6, color = '#dfe4ea') {
   return g;
 }
 export function nightstand() {
+  const r = real('nightstand');
+  if (r) {
+    const l = cyl(r, 0.1, 0.12, 0.2, mat('lampshade', { color: '#f3e9d6', emissive: '#ffd9a0', emissiveIntensity: 0.6, roughness: 0.8 }), 0, 0.73, 0);
+    l.castShadow = false;
+    cyl(r, 0.02, 0.05, 0.12, M.gold(), 0, 0.61, 0);
+    return r;
+  }
   const g = new THREE.Group();
   box(g, 0.45, 0.5, 0.4, M.wood(), 0, 0.25, 0);
   box(g, 0.4, 0.02, 0.02, M.gold(), 0, 0.35, 0.205);
@@ -156,6 +170,7 @@ export function nightstand() {
   return g;
 }
 export function wardrobe(w = 1.6) {
+  const r = real('wardrobe', { w }); if (r) return r;
   const g = new THREE.Group();
   box(g, w, 2.2, 0.6, M.lightWood(), 0, 1.1, 0);
   box(g, 0.01, 2.1, 0.01, M.black(), 0, 1.1, 0.305);
@@ -163,6 +178,7 @@ export function wardrobe(w = 1.6) {
   return g;
 }
 export function mirror() {
+  const r = real('mirror'); if (r) { r.children[0].position.y = 0.3; return r; }
   const g = new THREE.Group();
   box(g, 0.7, 1.8, 0.05, M.gold(), 0, 1.0, 0);
   const s = new THREE.Mesh(new THREE.PlaneGeometry(0.62, 1.72), mat('mirror', { color: '#d8e4ec', metalness: 1, roughness: 0.02, envMapIntensity: 1.6 }));
@@ -215,6 +231,7 @@ export function microwave() {
   return g;
 }
 export function diningTable(w = 1.6, d = 0.9, cloth = false) {
+  const r = cloth ? null : real('diningTable', { w, d, h: 0.78 }); if (r) return r;
   const g = new THREE.Group();
   box(g, w, 0.05, d, cloth ? M.white() : M.wood(), 0, 0.76, 0);
   if (cloth) box(g, w + 0.06, 0.3, d + 0.06, M.white(), 0, 0.63, 0);
@@ -222,6 +239,7 @@ export function diningTable(w = 1.6, d = 0.9, cloth = false) {
   return g;
 }
 export function roundTable(r = 0.45, h = 0.76, top?: THREE.Material) {
+  const rm = top ? null : real('roundTable', { w: r * 2, d: r * 2, h: h + 0.02 }); if (rm) return rm;
   const g = new THREE.Group();
   cyl(g, r, r, 0.04, top ?? M.marbleTop(), 0, h, 0, 24);
   cyl(g, 0.04, 0.04, h, M.black(), 0, h / 2, 0, 8);
@@ -229,6 +247,7 @@ export function roundTable(r = 0.45, h = 0.76, top?: THREE.Material) {
   return g;
 }
 export function chair(color = '#3d2a1e') {
+  const r = real('chair'); if (r) return r;
   const g = new THREE.Group();
   const w = mat('chairwood' + color, { color, roughness: 0.6 });
   box(g, 0.44, 0.05, 0.44, w, 0, 0.46, 0);
@@ -237,6 +256,7 @@ export function chair(color = '#3d2a1e') {
   return g;
 }
 export function stool(h = 0.75) {
+  const r = real('stool', { h: h + 0.03 }); if (r) return r;
   const g = new THREE.Group();
   cyl(g, 0.19, 0.19, 0.06, M.leather('#1d1d20'), 0, h, 0);
   cyl(g, 0.025, 0.025, h, M.chrome(), 0, h / 2, 0, 8);
@@ -254,6 +274,7 @@ export function officeChair(gaming = false) {
   return g;
 }
 export function desk(w = 1.6, d = 0.75) {
+  const r = real('desk', { w, d, h: 0.76 }); if (r) return r;
   const g = new THREE.Group();
   box(g, w, 0.04, d, M.lightWood(), 0, 0.74, 0);
   for (const sx of [-1, 1]) box(g, 0.05, 0.72, d - 0.05, M.black(), sx * (w / 2 - 0.05), 0.36, 0);
