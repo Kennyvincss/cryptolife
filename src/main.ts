@@ -9,12 +9,13 @@ import { music, remoteMusic, venueMusic } from './audio/music.js';
 import { Input, isTouchDevice } from './engine/input.js';
 import { mountTouch } from './ui/touch.js';
 import { enableLandscape } from './ui/orient.js';
-import { Renderer } from './engine/renderer.js';
+import { Renderer, type Quality } from './engine/renderer.js';
 import { Environment } from './engine/sky.js';
 import { Humanoid, randomLook, type Anim } from './entities/humanoid.js';
 import { loadRigs } from './entities/rig.js';
 import { fleet, loadCarModel } from './entities/carmodel.js';
 import { CarEntry } from './systems/carentry.js';
+import { DoorWalk } from './systems/doorwalk.js';
 import { Car } from './entities/vehicle.js';
 import { act, connect, detectMode, sendPos, tokenKey } from './net/client.js';
 import { emit, gameMinutes, on, store, timeOverride } from './state.js';
@@ -26,7 +27,7 @@ import { run, toast } from './ui/components.js';
 import { HUD } from './ui/hud.js';
 import { characterCreator, loginScreen } from './ui/login.js';
 import { buildBaseMap, route } from './ui/map.js';
-import { buildCity, type CityBuild } from './world/city.js';
+import { buildCity, type CityBuild, type DoorInfo } from './world/city.js';
 import { setFacadeNight } from './world/facade.js';
 import { Forest } from './world/trees.js';
 import { surfaceUniforms } from './world/pbr.js';
@@ -56,16 +57,18 @@ let traffic!: Traffic;
 let peds!: Pedestrians;
 scene.add(fleet.group);
 function populate() {
-  traffic = new Traffic(R.quality === 'low' ? 16 : 26);
+  traffic = new Traffic(R.quality === 'low' ? 14 : 22);
   scene.add(traffic.group);
-  peds = new Pedestrians(R.quality === 'low' ? 22 : 40);
+  peds = new Pedestrians(R.quality === 'low' ? 18 : R.quality === 'medium' ? 26 : 32);
   scene.add(peds.group);
   city.populateParked();
 }
 const remotes = new RemotePlayers();
 scene.add(remotes.group);
-env.setShadowSize(R.quality === 'high' ? 4096 : 2048);
-env.setShadowExtent(R.quality === 'high' ? 90 : 70);
+const SHADOW: Record<Quality, number> = { low: 1024, medium: 1024, high: 2048, ultra: 4096 };
+env.setShadowSize(SHADOW[R.quality]);
+env.setShadowExtent(R.quality === 'ultra' ? 90 : 70);
+forest.nearDist = R.quality === 'ultra' ? 85 : 55;
 
 // light pool (fixed count avoids shader recompiles when switching zones)
 const pool: THREE.PointLight[] = [];
@@ -76,6 +79,7 @@ scene.add(headlight, headlight.target);
 let hud: HUD;
 let player: PlayerController;
 let carEntry: CarEntry;
+let doorWalk: DoorWalk;
 let liftEnd: (() => void) | null = null;
 let body: Humanoid;
 let zone = 'street';
@@ -109,9 +113,10 @@ async function enterZone(z: string, home?: HomeData) {
   }
   hud.fade(true);
   await new Promise((r) => setTimeout(r, 280));
-  audio.sfx('door');
+  doorWalk.cancel();
   if (player.mode === 'drive') leaveCar();
   player.stand();
+  if (player.mode === 'script') player.mode = 'walk';
   interior?.dispose();
   interior = buildInterior(z, home);
   scene.add(interior.group);
@@ -130,7 +135,40 @@ async function enterZone(z: string, home?: HomeData) {
   else venueMusic.setStation(null);
   if (music.output === 'car') music.setOutput('headphones');
   if (z === 'convention' || z === 'hackhouse') refreshCityLists();
+  // step in through the open door, then it swings shut behind you
+  const dr = interior.door;
+  if (dr) {
+    dr.set(0.95);
+    doorWalk.run([{ walk: interior.spawn, speed: 1.4 }, { door: dr.set, from: 0.95, to: 0, t: 0.6 }], { from: dr.inside.clone(), heading: Math.PI });
+  }
   setTimeout(() => hud.fade(false), 120);
+}
+
+/** Walk up to a street entrance, the doors slide open, walk in. */
+function walkIn(d: DoorInfo) {
+  if (doorWalk.busy || carEntry.busy || player.mode === 'drive') return;
+  player.stand();
+  const facing = d.facing + Math.PI;
+  const stand = d.center.clone().addScaledVector(d.front, 1.25), through = d.center.clone().addScaledVector(d.front, -0.35);
+  doorWalk.run([
+    { walk: stand, speed: 1.5 }, { face: facing, t: 0.2 },
+    { door: d.set, from: 0, to: 1, t: 0.6 },
+    { walk: through, speed: 1.3 },
+    { call: () => enterZone(d.zone).catch((e) => { toast(e.message, 'warn'); d.set(0); if (player.mode === 'script') player.mode = 'walk'; player.teleport(stand, d.facing); }) },
+  ], { from: player.pos.clone() });
+}
+
+/** Inside: walk to the door, open it, step through, out onto the street. */
+function walkOut() {
+  const dr = interior?.door;
+  if (!dr || doorWalk.busy) { exitBuilding(); return; }
+  player.stand();
+  doorWalk.run([
+    { walk: dr.stand, speed: 1.4 }, { face: 0, t: 0.2 },
+    { door: dr.set, from: 0, to: 1, t: 0.55 },
+    { walk: dr.through, speed: 1.3 },
+    { call: async () => { await exitBuilding(); if (zone !== 'street' && interior?.door) { if (player.mode === 'script') player.mode = 'walk'; interior.door.set(0); player.teleport(interior.door.stand, Math.PI); } } },
+  ], { from: player.pos.clone() });
 }
 
 async function exitBuilding() {
@@ -138,8 +176,9 @@ async function exitBuilding() {
   if (!r) return;
   hud.fade(true);
   await new Promise((res) => setTimeout(res, 250));
-  audio.sfx('door');
+  doorWalk.cancel();
   player.stand();
+  if (player.mode === 'script') player.mode = 'walk';
   interior?.dispose(); interior = null;
   player.camBounds = null;
   city.group.visible = true; traffic.group.visible = true; peds.group.visible = true;
@@ -152,6 +191,13 @@ async function exitBuilding() {
   const door = city.doors.find((dd) => Math.hypot(dd.pos.x - d[0], dd.pos.z - d[2]) < 0.5);
   const facing = door ? door.facing : 0;
   player.teleport(new THREE.Vector3(d[0] + Math.sin(facing) * 1.2, 0.15, d[2] + Math.cos(facing) * 1.2), facing);
+  if (door) {
+    // start in the doorway with the doors open, walk out, doors slide shut
+    const out = door.center.clone().addScaledVector(door.front, 1.6);
+    door.set(1);
+    player.teleport(out, facing);
+    doorWalk.run([{ walk: out, speed: 1.4 }, { door: door.set, from: 1, to: 0, t: 0.6 }], { from: door.center.clone().addScaledVector(door.front, -0.2), heading: facing });
+  }
   for (const l of pool) l.intensity = 0;
   setTimeout(() => hud.fade(false), 120);
 }
@@ -264,7 +310,7 @@ Object.assign(api, {
   closePanel: () => hud.closePanel(),
   toast,
   fade: async <T,>(fn: () => T | Promise<T>) => { hud.fade(true); await new Promise((r) => setTimeout(r, 400)); const r = await fn(); await new Promise((res) => setTimeout(res, 500)); hud.fade(false); return r; },
-  exitBuilding,
+  exitBuilding: () => walkOut(),
   enterZone: (z: string) => enterZone(z).catch((e) => toast(e.message, 'warn')),
   hold: (model: string | null) => {
     if (held) { body.setHeld(null); held = null; }
@@ -298,7 +344,7 @@ Object.assign(api, {
     pendingTest = model;
     exitBuilding();
   },
-  setQuality: (q: 'low' | 'medium' | 'high') => { R.setQuality(q); env.setShadowSize(q === 'high' ? 4096 : 2048); env.setShadowExtent(q === 'high' ? 90 : 70); },
+  setQuality: (q: Quality) => { R.setQuality(q); env.setShadowSize(SHADOW[q]); env.setShadowExtent(q === 'ultra' ? 90 : 70); forest.nearDist = q === 'ultra' ? 85 : 55; },
   placeAt: (p: THREE.Vector3, heading: number) => { player.stand(); player.teleport(p.clone().setY(0), heading); },
   lift: (anim: Anim, prop: 'barbell' | 'dumbbells', p: THREE.Vector3, heading: number, onEnd?: () => void) => {
     player.stand();
@@ -363,6 +409,7 @@ function start() {
   scene.add(body.root);
   player = new PlayerController(body, R.camera);
   carEntry = new CarEntry(player, (n) => audio.sfx(n));
+  doorWalk = new DoorWalk(player, () => audio.sfx('door'));
   player.onStand = () => { body.setGymProp(null); liftEnd?.(); liftEnd = null; };
   player.teleport(new THREE.Vector3(...PLAYER_SPAWN).setY(0.15), Math.PI / 2);
   hud = new HUD();
@@ -384,7 +431,7 @@ function start() {
     pickup: store.me?.ride?.role === 'driver' && store.me.ride.status === 'assigned' ? { x: store.me.ride.pickup[0], z: store.me.ride.pickup[2] } : null,
   });
   // exterior interactables
-  for (const d of city.doors) interact.add({ pos: d.pos, zone: 'street', key: 'E', radius: 2.4, label: `Enter ${d.name}`, action: () => api.enterZone(d.zone) });
+  for (const d of city.doors) interact.add({ pos: d.pos, zone: 'street', key: 'E', radius: 2.4, label: `Enter ${d.name}`, action: () => walkIn(d) });
   for (const b of city.benches) interact.add({ pos: b.pos, zone: 'street', radius: 1.3, label: 'Sit on bench', action: () => player.sit(b.pos.clone().add(new THREE.Vector3(Math.sin(b.rot) * 0.05, 0, Math.cos(b.rot) * 0.05)), b.rot, 'sit', 0.45 + 0.15) });
 
   on('me', (m) => {
@@ -410,6 +457,8 @@ function start() {
     tp(z: string) { const d = city.doors.find((x) => x.zone === z); if (d) player.teleport(d.pos.clone().add(new THREE.Vector3(Math.sin(d.facing) * 2, 0, Math.cos(d.facing) * 2)), d.facing + Math.PI); },
     time(m: number | null) { timeOverride.minutes = m; },
     enter: (z: string) => enterZone(z),
+    exit: () => exitBuilding(),
+    get doorWalk() { return doorWalk; }, walkOut: () => walkOut(), walkIn: (z: string) => { const d = city.doors.find((x) => x.zone === z); if (d) walkIn(d); },
   };
 }
 
@@ -559,18 +608,23 @@ let t = 0;
 let lastRide = '';
 // FPS governor: if the machine can't hold ~30 fps, step quality down once per level
 // (only when the player hasn't chosen a quality themselves).
-const gov = { frames: 0, time: 0, settle: 6, manual: localStorage.getItem('cc_quality_manual') === '1' };
+// Dynamic resolution first (render scale 0.6..1 every ~1.5 s), then whole quality steps.
+const gov = { frames: 0, time: 0, settle: 4, slow: 0, manual: localStorage.getItem('cc_quality_manual') === '1' };
 function governor(rawDt: number) {
-  if (gov.manual || zone !== 'street' || document.hidden) { gov.frames = 0; gov.time = 0; return; }
+  if (document.hidden || rawDt > 0.25) { gov.frames = 0; gov.time = 0; return; }
   if (gov.settle > 0) { gov.settle -= rawDt; return; }
   gov.frames++; gov.time += rawDt;
-  if (gov.time < 4) return;
+  if (gov.time < 1.5) return;
   const fps = gov.frames / gov.time;
   gov.frames = 0; gov.time = 0;
-  if (fps < 27 && R.quality !== 'low') {
-    const next = R.quality === 'high' ? 'medium' : 'low';
+  if (fps < 50) R.setScale(R.scale - (fps < 35 ? 0.15 : 0.08));
+  else if (fps > 58 && R.scale < 1) R.setScale(R.scale + 0.05);
+  gov.slow = fps < 30 && R.scale <= 0.61 ? gov.slow + 1 : 0;
+  if (gov.slow >= 2 && !gov.manual && zone === 'street' && R.quality !== 'low') {
+    const next = R.quality === 'ultra' ? 'high' : R.quality === 'high' ? 'medium' : 'low';
     api.setQuality(next);
-    gov.settle = 4;
+    R.setScale(1);
+    gov.settle = 3; gov.slow = 0;
     toast(`Graphics lowered to ${next} to keep the game smooth (${Math.round(fps)} fps). Change it in Phone → Settings.`, 'ok');
   }
 }
@@ -604,7 +658,7 @@ function loop(now: number) {
   }
 
   // interactions
-  const opts = player.mode === 'drive' ? [] : interact.available(player.pos, zone);
+  const opts = player.mode === 'drive' || player.mode === 'script' ? [] : interact.available(player.pos, zone);
   const extra: string[] = [];
   let fAction: (() => void) | null = null;
   let gAction: (() => void) | null = null;
@@ -640,6 +694,7 @@ function loop(now: number) {
     body.root.position.copy(player.pos);
   }
   carEntry.update(dt);
+  doorWalk.update(dt);
   if (player.mode === 'drive' && player.car) {
     const c = player.car;
     // other cars (parked, traffic, showroom) are solid

@@ -31,6 +31,8 @@ export interface InteriorBuild {
   music: { station: string; pos: THREE.Vector3; volume: number } | null;
   bounds: { minX: number; maxX: number; minZ: number; maxZ: number; maxY: number } | null;
   npcs: Humanoid[];
+  /** The real entrance door: animate 0 (shut) .. 1 (open); world points for walking through it. */
+  door: { set(v: number): void; stand: THREE.Vector3; through: THREE.Vector3; inside: THREE.Vector3 } | null;
   dispose(): void;
 }
 
@@ -52,6 +54,7 @@ class Kit {
   music: InteriorBuild['music'] = null;
   remove: (() => void)[] = [];
   bounds: InteriorBuild['bounds'] = null;
+  door: InteriorBuild['door'] = null;
 
   constructor(public zone: string) {
     this.group.position.copy(INTERIOR_ORIGIN);
@@ -156,10 +159,50 @@ class Kit {
     this.wallSeg(-w / 2, -d / 2, -w / 2, d / 2, h, wall);
     this.wallSeg(w / 2, -d / 2, w / 2, d / 2, h, wall);
     this.wallSeg(-w / 2, d / 2, w / 2, d / 2, h, wall, [{ at: 0, w: doorW }]);
-    // door + exit
+    // the entrance: a real double door (solid when shut) opening onto a lit vestibule
     const dm = mat('intdoor', { color: '#1a1c20', metalness: 0.4, roughness: 0.4 });
-    this.box(doorW + 0.3, 0.2, t + 0.05, dm, 0, Math.min(h, 3) - 0.1, d / 2);
-    this.B.add(new THREE.PlaneGeometry(doorW, Math.min(h, 3) - 0.2), glowMat('#fff0d8', 0.8), { x: 0, y: (Math.min(h, 3) - 0.2) / 2, z: d / 2 + 0.11 }, Math.PI);
+    const gapH = h > 2.6 ? 2.4 : h;
+    this.box(doorW + 0.3, 0.12, t + 0.06, dm, 0, gapH + 0.06, d / 2);
+    for (const s of [-1, 1]) this.box(0.08, gapH, t + 0.06, dm, s * (doorW / 2 + 0.04), gapH / 2, d / 2);
+    const vd = 0.9;
+    const vest = mat('vestibule', { color: '#d9d4cc', roughness: 0.8 });
+    for (const s of [-1, 1]) this.box(0.1, gapH, vd, vest, s * (doorW / 2 + 0.05), gapH / 2, d / 2 + vd / 2);
+    this.box(doorW, 0.05, vd, vest, 0, gapH, d / 2 + vd / 2);
+    this.box(doorW, 0.02, vd, mat('vestfloor', { color: '#3a3936', roughness: 0.7 }), 0, 0.0, d / 2 + vd / 2);
+    this.B.add(new THREE.PlaneGeometry(doorW, gapH), glowMat('#fff0d8', 0.9), { x: 0, y: gapH / 2, z: d / 2 + vd }, Math.PI);
+    this.colliders.addBox(INTERIOR_ORIGIN.x, INTERIOR_ORIGIN.z + d / 2 + 0.1, doorW + 0.2, 0.5, 'door', 3);
+    const wood = surf('wood', { tile: 1, mode: 'uv', color: '#7d5638', roughness: 0.6, macro: 0.05 });
+    const panelM = surf('wood', { tile: 1, mode: 'uv', color: '#6a4930', roughness: 0.55, macro: 0.05 });
+    const handleM = mat('doorhandle', { color: '#c9ccd0', metalness: 1, roughness: 0.22 });
+    const leafW = doorW / 2 - 0.02, leafH = gapH - 0.03;
+    const leaves: THREE.Group[] = [];
+    for (const s of [-1, 1]) {
+      const pivot = new THREE.Group();
+      pivot.position.set(s * doorW / 2, 0, d / 2);
+      const leaf = new THREE.Mesh(new THREE.BoxGeometry(leafW, leafH, 0.05), wood);
+      leaf.position.set(-s * leafW / 2, leafH / 2 + 0.01, 0);
+      leaf.castShadow = leaf.receiveShadow = true;
+      pivot.add(leaf);
+      // raised panels on both faces + lever handles
+      for (const face of [-1, 1]) {
+        for (const [py, ph] of [[leafH * 0.72, leafH * 0.38], [leafH * 0.26, leafH * 0.34]]) {
+          const pn = new THREE.Mesh(new THREE.BoxGeometry(leafW - 0.22, ph, 0.02), panelM);
+          pn.position.set(-s * leafW / 2, py, face * 0.03);
+          pivot.add(pn);
+        }
+        const rose = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.02, 16).rotateX(Math.PI / 2), handleM);
+        rose.position.set(-s * (leafW - 0.09), 1.02, face * 0.035);
+        const lever = new THREE.Mesh(new THREE.CapsuleGeometry(0.012, 0.12, 4, 8).rotateZ(Math.PI / 2), handleM);
+        lever.position.set(-s * (leafW - 0.09) + s * 0.06, 1.02, face * 0.06);
+        pivot.add(rose, lever);
+      }
+      this.group.add(pivot);
+      leaves.push(pivot);
+    }
+    this.door = {
+      set: (v: number) => { leaves[0].rotation.y = 1.5 * v; leaves[1].rotation.y = -1.5 * v; },
+      stand: this.w(0, d / 2 - 1.0), through: this.w(0, d / 2 + 0.45), inside: this.w(0, d / 2 - 0.15),
+    };
     this.act(0, d / 2 - 0.6, 'Exit to street', () => api.exitBuilding(), 1.8);
     this.spawn = this.w(0, d / 2 - 1.6);
     this.spawnRot = Math.PI;
@@ -207,7 +250,7 @@ class Kit {
     const self = this;
     return {
       zone: this.zone, group: this.group, colliders: this.colliders, spawn: this.spawn, spawnRot: this.spawnRot,
-      lights: this.lights, ambient: this.ambient, music: this.music, bounds: this.bounds, npcs: this.npcs,
+      lights: this.lights, ambient: this.ambient, music: this.music, bounds: this.bounds, npcs: this.npcs, door: this.door,
       update(dt, t, night) {
         for (const u of self.updaters) u(dt, t, night);
         screenT += dt;

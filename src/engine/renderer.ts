@@ -14,7 +14,7 @@ import { setMaxAnisotropy } from './textures.js';
 import { view } from '../ui/orient.js';
 import { on } from '../state.js';
 
-export type Quality = 'low' | 'medium' | 'high';
+export type Quality = 'low' | 'medium' | 'high' | 'ultra';
 
 /** Final grade in display space: gentle S-curve, split toning, vignette, film grain. */
 const GradeShader = {
@@ -60,7 +60,7 @@ export class Renderer {
 
   constructor(container: HTMLElement) {
     const coarse = matchMedia('(pointer: coarse)').matches;
-    this.quality = (localStorage.getItem('cc_quality_v2') as Quality) || (coarse ? 'low' : 'high');
+    this.quality = (localStorage.getItem('cc_quality_v3') as Quality) || (coarse ? 'low' : 'high');
     this.renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance', stencil: false });
     this.renderer.shadowMap.enabled = this.quality !== 'low';
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
@@ -93,21 +93,36 @@ export class Renderer {
     this.resize();
   }
 
+  /** Dynamic resolution: the governor scales this between 0.6 and 1 to hold the frame rate. */
+  scale = 1;
+  private basePr = 1;
   applyQuality() {
     const q = this.quality;
-    const pr = Math.min(window.devicePixelRatio, q === 'high' ? 1.5 : q === 'medium' ? 1.25 : 1);
-    this.renderer.setPixelRatio(pr);
-    this.composer.setPixelRatio(pr);
+    this.basePr = Math.min(window.devicePixelRatio, q === 'ultra' ? 1.5 : q === 'high' ? 1.25 : 1);
+    this.applyScale();
     this.renderer.shadowMap.enabled = q !== 'low';
     this.bloom.enabled = q !== 'low';
-    this.gtao.enabled = q === 'high';
+    // screen-space AO re-renders the whole scene: only on ultra
+    this.gtao.enabled = q === 'ultra';
     this.grade.enabled = q !== 'low';
-    this.target.samples = q === 'low' ? 0 : 4;
+    this.target.samples = q === 'low' ? 0 : q === 'medium' ? 2 : 4;
+    this.resize();
+  }
+  private applyScale() {
+    const pr = Math.max(0.5, this.basePr * this.scale);
+    this.renderer.setPixelRatio(pr);
+    this.composer.setPixelRatio(pr);
+  }
+  setScale(s: number) {
+    s = Math.min(1, Math.max(0.6, s));
+    if (Math.abs(s - this.scale) < 0.01) return;
+    this.scale = s;
+    this.applyScale();
     this.resize();
   }
   setQuality(q: Quality) {
     this.quality = q;
-    localStorage.setItem('cc_quality_v2', q);
+    localStorage.setItem('cc_quality_v3', q);
     this.applyQuality();
     this.scene.traverse((o) => { const m = (o as THREE.Mesh).material as THREE.Material | undefined; if (m) m.needsUpdate = true; });
   }

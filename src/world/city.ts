@@ -14,12 +14,19 @@ import { buildVehicle } from '../entities/vehicle.js';
 import { Colliders } from './colliders.js';
 import { buildOcean, type Ocean } from './water.js';
 import { boxWalls, facadeMaterial, type FacadeKind } from './facade.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { atlasQuad, decalMaterial, surfaceMaterial, wearPaint } from './pbr.js';
 import type { TreeSpot } from './trees.js';
 
 export const CURB_H = 0.15;
 
-export interface DoorInfo { zone: string; name: string; pos: THREE.Vector3; facing: number; feature: Feature }
+export interface DoorInfo {
+  zone: string; name: string; pos: THREE.Vector3; facing: number; feature: Feature;
+  /** Centre of the doorway (ground level) and its outward normal. */
+  center: THREE.Vector3; front: THREE.Vector3;
+  /** Slide the glass doors: 0 shut .. 1 open. */
+  set(v: number): void;
+}
 export interface Bench { pos: THREE.Vector3; rot: number }
 
 export interface CityBuild {
@@ -58,6 +65,8 @@ const DISTRICT_H: Record<DistrictId, [number, number]> = {
 
 export function buildCity(lowQuality = false): CityBuild {
   const group = new THREE.Group();
+  let lobby: THREE.MeshBasicMaterial | null = null;
+  let doorGeo: { glass: THREE.BufferGeometry; frame: THREE.BufferGeometry; glassM: THREE.Material; frameM: THREE.Material } | null = null;
   group.name = 'city';
   const colliders = new Colliders();
   const B = new Batcher();
@@ -390,6 +399,55 @@ export function buildCity(lowQuality = false): CityBuild {
     return m;
   }
 
+  /** Warm lobby glimpsed through an open entrance. */
+  function lobbyMat() {
+    if (lobby) return lobby;
+    const c = document.createElement('canvas'); c.width = 128; c.height = 160;
+    const x = c.getContext('2d')!;
+    const g = x.createLinearGradient(0, 0, 0, 160);
+    g.addColorStop(0, '#f6e7cf'); g.addColorStop(0.55, '#d8c3a2'); g.addColorStop(0.62, '#8c7a66'); g.addColorStop(1, '#4b4036');
+    x.fillStyle = g; x.fillRect(0, 0, 128, 160);
+    const r = x.createRadialGradient(64, 10, 2, 64, 10, 70); r.addColorStop(0, 'rgba(255,250,235,0.9)'); r.addColorStop(1, 'rgba(255,250,235,0)');
+    x.fillStyle = r; x.fillRect(0, 0, 128, 90);
+    x.fillStyle = 'rgba(40,30,22,0.35)'; x.fillRect(18, 52, 22, 46); x.fillRect(92, 60, 14, 38);
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+    lobby = new THREE.MeshBasicMaterial({ map: t, color: new THREE.Color(0.8, 0.8, 0.8) });
+    return lobby;
+  }
+  /** Automatic sliding glass doors (two leaves); returns a 0..1 opener. */
+  function slidingDoors(at: THREE.Vector3, rotY: number, _along: THREE.Vector3) {
+    if (!doorGeo) {
+      const W = 1.13, H = 2.9, f = 0.05;
+      const parts = [
+        new THREE.BoxGeometry(W, f, 0.06).translate(0, H - f / 2, 0), new THREE.BoxGeometry(W, 0.12, 0.06).translate(0, 0.06, 0),
+        new THREE.BoxGeometry(f, H, 0.06).translate(-W / 2 + f / 2, H / 2, 0), new THREE.BoxGeometry(f, H, 0.06).translate(W / 2 - f / 2, H / 2, 0),
+        // long pull handle on the meeting edge
+        new THREE.CylinderGeometry(0.014, 0.014, 0.9, 10).translate(W / 2 - 0.12, 1.15, 0.07),
+        new THREE.CylinderGeometry(0.014, 0.014, 0.9, 10).translate(W / 2 - 0.12, 1.15, -0.07),
+      ];
+      doorGeo = {
+        glass: new THREE.BoxGeometry(W - 2 * f, H - 0.17, 0.012).translate(0, 0.12 + (H - 0.17) / 2, 0),
+        frame: mergeGeometries(parts.map((g) => g.index ? g.toNonIndexed() : g))!,
+        glassM: new THREE.MeshStandardMaterial({ color: '#0f171d', metalness: 0.2, roughness: 0.04, transparent: true, opacity: 0.45, envMapIntensity: 1.6 }),
+        frameM: mat('doorframe', { color: '#2a2c30', metalness: 0.8, roughness: 0.32 }),
+      };
+    }
+    const root = new THREE.Group();
+    root.position.copy(at); root.rotation.y = rotY;
+    const leaves: THREE.Group[] = [];
+    for (const s of [-1, 1]) {
+      const leaf = new THREE.Group();
+      const gm = new THREE.Mesh(doorGeo.glass, doorGeo.glassM);
+      const fm = new THREE.Mesh(doorGeo.frame, doorGeo.frameM);
+      fm.castShadow = true;
+      leaf.add(gm, fm);
+      leaf.scale.x = -s; // mirror so both handles meet in the middle
+      leaf.position.x = s * 0.575;
+      root.add(leaf); leaves.push(leaf);
+    }
+    group.add(root);
+    return (v: number) => { leaves[0].position.x = -0.575 - 1.1 * v; leaves[1].position.x = 0.575 + 1.1 * v; };
+  }
   function buildFeature(f: Feature, district: DistrictId) {
     const g = featureGeom(f);
     const styleMap: Record<Style, FacadeStyle> = { glass: 'glass', marble: 'marble', brick: 'brick', neon: 'neon', concrete: 'concrete', villa: 'villa', industrial: 'industrial' };
@@ -427,9 +485,9 @@ export function buildCity(lowQuality = false): CityBuild {
     const doorC = faceC.clone().addScaledVector(front, 0.08);
     const frameM = mat('doorframe', { color: '#2a2c30', metalness: 0.8, roughness: 0.32 });
     B.add(new THREE.BoxGeometry(2.7, 3.25, 0.18), frameM, { x: doorC.x, y: CURB_H + 1.62, z: doorC.z }, rotY);
-    B.add(new THREE.BoxGeometry(2.3, 2.95, 0.2), mat('doorglass', { color: '#0b0f14', metalness: 0.7, roughness: 0.04 }), { x: doorC.x, y: CURB_H + 1.48, z: doorC.z }, rotY);
-    B.add(new THREE.BoxGeometry(0.05, 2.95, 0.22), frameM, { x: doorC.x, y: CURB_H + 1.48, z: doorC.z }, rotY);
-    for (const sx of [-0.25, 0.25]) B.add(new THREE.BoxGeometry(0.04, 0.6, 0.06), mat('chromehandle', { color: '#d8dce0', metalness: 1, roughness: 0.15 }), { x: doorC.x + along.x * sx + front.x * 0.13, y: CURB_H + 1.3, z: doorC.z + along.z * sx + front.z * 0.13 }, rotY);
+    // lit lobby behind the glass (seen when the doors slide open)
+    B.add(new THREE.PlaneGeometry(2.3, 2.95), lobbyMat(), { x: doorC.x + front.x * 0.1, y: CURB_H + 1.48, z: doorC.z + front.z * 0.1 }, rotY);
+    const leavesSet = slidingDoors(doorC.clone().setY(CURB_H).addScaledVector(front, 0.13), rotY, along);
     B.add(new THREE.BoxGeometry(2.7, 0.08, 0.24), glowMatNight(accent, 3), { x: doorC.x, y: CURB_H + 3.28, z: doorC.z }, rotY);
     // the frame sticks out of the wall: make it solid
     colliders.addBox(doorC.x + front.x * 0.05, doorC.z + front.z * 0.05, Math.abs(front.z) > 0.5 ? 2.8 : 0.35, Math.abs(front.x) > 0.5 ? 2.8 : 0.35, 'doorframe', 3.3);
@@ -447,9 +505,7 @@ export function buildCity(lowQuality = false): CityBuild {
     group.add(sign);
     const door = new THREE.Vector3(...g.door);
     door.y = CURB_H;
-    doors.push({ zone: f.zone, name: f.name, pos: door, facing: rotY, feature: f });
-    // marker ring
-    B.add(new THREE.RingGeometry(0.7, 0.9, 32), glowMat(accent, 2.5), { x: door.x, y: CURB_H + 0.02, z: door.z }, 0, undefined, new THREE.Euler(-Math.PI / 2, 0, 0));
+    doors.push({ zone: f.zone, name: f.name, pos: door, facing: rotY, feature: f, center: doorC.clone().setY(CURB_H), front: front.clone(), set: leavesSet });
 
     if (f.zone === 'exchange') {
       // giant ticker wall on the facade

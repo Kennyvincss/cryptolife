@@ -27,7 +27,7 @@ export interface GameAPI {
   previewLook(look: import('../shared/types.js').Look | null): void;
   callVehicle(uid: string): void;
   testDrive(model: string): void;
-  setQuality(q: 'low' | 'medium' | 'high'): void;
+  setQuality(q: 'low' | 'medium' | 'high' | 'ultra'): void;
   teleportLocal(x: number, z: number, y?: number): void;
   placeAt(pos: THREE.Vector3, heading: number): void;
   /** Start a lift at a gym spot holding real weights; `onEnd` runs when the player steps away. */

@@ -31,7 +31,7 @@ export class PlayerController {
   firstPerson = false;
   camBounds: { minX: number; maxX: number; minZ: number; maxZ: number; maxY: number } | null = null;
   /** Pose driven by a scripted sequence (getting in / out of cars). */
-  script = { pos: new THREE.Vector3(), heading: 0, anim: 'idle' as Anim, speed: 0, camHeight: 1.4, camDist: 0 };
+  script = { pos: new THREE.Vector3(), heading: 0, anim: 'idle' as Anim, speed: 0, camHeight: 1.4, camDist: 0, follow: false };
 
   constructor(public body: Humanoid, public camera: THREE.PerspectiveCamera) {}
 
@@ -94,6 +94,7 @@ export class PlayerController {
       this.body.root.position.copy(sc.pos);
       this.body.root.rotation.set(0, sc.heading, 0);
       this.body.update(dt, sc.anim, sc.speed);
+      if (sc.follow) { const want = sc.heading + Math.PI; this.camYaw += Math.atan2(Math.sin(want - this.camYaw), Math.cos(want - this.camYaw)) * Math.min(1, dt * 3); }
       this.updateCamera(dt, colliders, sc.camHeight, sc.camDist || this.camDist);
       return;
     }

@@ -88,7 +88,9 @@ export class Forest {
   nearDist = 85;
 
   /** Grows the tree variants (near + far LOD) and instances them over `spots` in culling chunks. */
+  private shadows = false;
   build(spots: TreeSpot[], opts: { shadows: boolean; low: boolean }) {
+    this.shadows = opts.shadows;
     const list = opts.low ? VARIANTS.filter((v, i) => i < 2 || v.bush) : VARIANTS;
     const near = list.map((v) => grow(v)), far = list.map((v) => grow(v, true));
     const streetIdx = list.map((v, i) => (v.park || v.bush ? -1 : i)).filter((i) => i >= 0);
@@ -137,6 +139,8 @@ export class Forest {
       const isNear = d < this.nearDist, show = d < maxDist + 60;
       for (const m of ch.near) m.visible = show && isNear;
       for (const m of ch.far) m.visible = show && !isNear;
+      // only trees inside the sun's shadow box need to cast
+      if (this.shadows) ch.far[1].castShadow = d < 95;
     }
   }
 }

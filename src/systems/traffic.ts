@@ -339,11 +339,11 @@ export class Pedestrians {
     }
     for (const p of this.peds) {
       const d = p.h.root.position.distanceTo(focus);
-      const visible = d < 110;
+      const visible = d < 80;
       p.h.root.visible = visible;
       if (!visible) continue;
       p.h.showTag(d < 7);
-      if ((d < 35) !== p.h.castShadows) p.h.setShadows(d < 35);
+      if ((d < 22) !== p.h.castShadows) p.h.setShadows(d < 22);
       p.h.setAnimStep(d < 25 ? 0 : d < 60 ? 1 / 20 : 1 / 8);
       if (p.pause > 0) {
         p.pause -= dt;
