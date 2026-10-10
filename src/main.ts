@@ -27,7 +27,7 @@ import { Pedestrians, Traffic, signalPhase } from './systems/traffic.js';
 import { run, toast } from './ui/components.js';
 import { HUD } from './ui/hud.js';
 import { characterCreator, loginScreen } from './ui/login.js';
-import { buildBaseMap, route } from './ui/map.js';
+import { buildBaseMap, mapBase, route, setMapImage } from './ui/map.js';
 import { buildCity, type CityBuild, type DoorInfo } from './world/city.js';
 import { setFacadeNight } from './world/facade.js';
 import { Forest } from './world/trees.js';
@@ -426,6 +426,9 @@ async function boot() {
   await rigs;
   await loadModel(modelOf(me.look));
   populate();
+  setLoading('Mapping the city…');
+  await new Promise((res) => setTimeout(res, 50));
+  satelliteMap();
   loading?.classList.add('hidden');
   if (isNew) {
     const r = await characterCreator(me.look, me.career);
@@ -434,6 +437,51 @@ async function boot() {
     await run(act('profile.setCareer', { career: r.career }));
   }
   start();
+}
+
+/**
+ * Satellite map: render the real city straight down (orthographic, noon sun,
+ * shadows) in tiles and use that as the map image instead of a drawing.
+ */
+function satelliteMap() {
+  const ext = mapBase();
+  const S = ext.scale, tilePx = 1024, tileM = tilePx / S;
+  const W = Math.round((ext.maxX - ext.minX) * S), H = Math.round((ext.maxZ - ext.minZ) * S);
+  const out = document.createElement('canvas');
+  out.width = W; out.height = H;
+  const ctx = out.getContext('2d')!;
+  const r = R.renderer;
+  const hidden: THREE.Object3D[] = [];
+  for (const o of scene.children) if (o !== city.group && o !== fleet.group && !(o as THREE.Light).isLight && o.visible) { o.visible = false; hidden.push(o); }
+  const cityWas = city.group.visible, indoorWas = env.indoor, bgWas = scene.background;
+  city.group.visible = true; env.indoor = false; scene.background = new THREE.Color('#1c2a20');
+  const pr = r.getPixelRatio();
+  r.setPixelRatio(1);
+  r.setSize(tilePx, tilePx, false);
+  const cam = new THREE.OrthographicCamera(-tileM / 2, tileM / 2, tileM / 2, -tileM / 2, 1, 900);
+  cam.up.set(0, 0, -1); // image up = north (-z), like the drawn map
+  env.setShadowExtent(tileM * 0.72);
+  try {
+    for (let ty = 0; ty * tilePx < H; ty++) for (let tx = 0; tx * tilePx < W; tx++) {
+      const cx = ext.minX + (tx + 0.5) * tileM, cz = ext.minZ + (ty + 0.5) * tileM;
+      cam.position.set(cx, 450, cz);
+      cam.lookAt(cx, 0, cz);
+      cam.updateProjectionMatrix();
+      env.update(12.5 * 60, new THREE.Vector3(cx, 0, cz), cam.position, 0);
+      if (scene.fog) (scene.fog as THREE.FogExp2).density = 0;
+      forest.update(0, new THREE.Vector3(cx, 0, cz), 400);
+      fleet.update(cam.position, 2000);
+      r.shadowMap.needsUpdate = true;
+      r.render(scene, cam);
+      ctx.drawImage(r.domElement, tx * tilePx, ty * tilePx);
+    }
+    setMapImage(out);
+  } catch (e) { console.warn('[map] satellite render failed, keeping drawn map', e); }
+  for (const o of hidden) o.visible = true;
+  city.group.visible = cityWas; env.indoor = indoorWas; scene.background = bgWas;
+  env.setShadowExtent(R.quality === 'ultra' ? 90 : 70);
+  r.setPixelRatio(pr);
+  R.resize();
 }
 
 function start() {

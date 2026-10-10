@@ -18,6 +18,8 @@ const SCALE = 4; // px per meter in the base canvas (sharp when zoomed in on the
 let base: HTMLCanvasElement | null = null;
 /** Base map image and its world placement, for the interactive map. */
 export const mapBase = () => ({ img: base, minX, minZ, maxX, maxZ, scale: SCALE });
+/** Swap in a real top-down render of the city (same extent and scale as the drawn map). */
+export function setMapImage(c: HTMLCanvasElement) { base = c; }
 
 export function buildBaseMap(city: CityBuild) {
   const c = document.createElement('canvas');
