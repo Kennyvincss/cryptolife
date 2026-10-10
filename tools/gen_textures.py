@@ -267,6 +267,97 @@ def decals():
     print('wrote decals')
 
 
-TARGETS = dict(decals=decals, asphalt=asphalt, sidewalk=sidewalk, concrete=concrete, brick=brick, plaster=plaster, stone=stone, metal=metal, roof=roof, grass=grass)
+# ---------------------------------------------------------------- interiors
+def grain(n=N, stretch=24, seed=None):
+    """Wood-grain field: noise stretched along X (tileable)."""
+    warp = fnoise(n, beta=2.0, lo=1, hi=12, seed=seed)
+    yy = np.mgrid[0:n, 0:n][0] / n
+    rings = np.sin((yy * 46 + warp * 9) * np.pi * 2) * 0.5 + 0.5
+    rings = rings ** 3
+    fine = blur(np.repeat(fnoise(n, beta=0.4, lo=60, seed=(seed or 0) + 1)[:, :: stretch], stretch, 1)[:, :n], 1)
+    return np.clip(rings * 0.6 + fine * 0.4, 0, 1)
+
+
+def woodfloor():
+    # 4 m tile: 8 oak planks 19 cm wide, staggered board ends
+    y, x = np.mgrid[0:N, 0:N] / N
+    planks = 20
+    row = np.floor(y * planks)
+    off = (np.sin(row * 7.13) * 0.5 + 0.5)
+    bx = (x + off) % 1
+    blen = 0.5
+    board = np.floor(bx / blen) + row * 3
+    fy = (y * planks) % 1
+    fx = (bx / blen) % 1
+    gap = np.clip(np.minimum(np.minimum(fy, 1 - fy) / 0.06, np.minimum(fx, 1 - fx) / 0.01), 0, 1)
+    g = grain(seed=11)
+    tone = (np.sin(board * 12.9898) * 43758.5453) % 1
+    oak = lerp3(col('#b98a5c'), col('#7a4a28'), np.clip(tone * 0.45 + g * 0.65, 0, 1))
+    albedo = oak * (0.82 + 0.25 * g)[..., None] * (0.55 + 0.45 * gap)[..., None]
+    h = gap * 0.6 + g * 0.15
+    rough = 0.42 + g * 0.18 + (1 - gap) * 0.3
+    save('woodfloor', albedo, h, rough, ao=0.6 + 0.4 * gap, nstrength=5)
+
+
+def wood():
+    # furniture timber, 1 m tile, long grain
+    g = grain(seed=21)
+    n = fnoise(beta=1.6, lo=1, seed=22)
+    albedo = lerp3(col('#7a4e2c'), col('#4a2c18'), np.clip(g * 0.8 + n * 0.25, 0, 1))
+    save('wood', albedo, g * 0.2, 0.45 + g * 0.2, nstrength=3)
+
+
+def tiles():
+    # 2.4 m tile: 4 x 4 porcelain tiles (60 cm) with grout
+    y, x = np.mgrid[0:N, 0:N] / N
+    fx, fy = (x * 4) % 1, (y * 4) % 1
+    grout = np.clip(np.minimum(np.minimum(fx, 1 - fx), np.minimum(fy, 1 - fy)) / 0.008, 0, 1)
+    tid = np.floor(x * 4) + np.floor(y * 4) * 5
+    var = ((np.sin(tid * 12.9898) * 43758.5453) % 1) * 0.06
+    n = fnoise(beta=1.5, lo=4, seed=31)
+    albedo = lerp3(col('#d8d6d0'), col('#ecebe6'), np.clip(n * 0.6 + var * 4, 0, 1)) * (0.62 + 0.38 * grout)[..., None]
+    h = grout * 0.5
+    rough = 0.18 + (1 - grout) * 0.6 + n * 0.08
+    save('tiles', albedo, h, rough, ao=0.6 + 0.4 * grout, nstrength=5)
+
+
+def marble():
+    # 3 m tile: large slabs with veining
+    y, x = np.mgrid[0:N, 0:N] / N
+    n = fnoise(beta=1.8, lo=1, seed=41)
+    w = fnoise(beta=2.2, lo=1, hi=30, seed=42)
+    veins = np.clip(1 - np.abs(np.sin((x * 3 + y * 1.4 + w * 2.5) * np.pi * 2)) / 0.04, 0, 1) * (fnoise(beta=1.0, lo=4, seed=43) > 0.45)
+    fx, fy = (x * 2) % 1, (y * 2) % 1
+    seam = np.clip(np.minimum(np.minimum(fx, 1 - fx), np.minimum(fy, 1 - fy)) / 0.002, 0, 1)
+    albedo = lerp3(col('#e6e3dc'), col('#f6f4ef'), n) * (1 - veins[..., None] * 0.45) * (0.85 + 0.15 * seam)[..., None]
+    albedo = albedo * (1 - veins[..., None] * np.array([0.05, 0.1, 0.15])[None, None, :])
+    save('marble', albedo, seam * 0.3, 0.08 + n * 0.08 + (1 - seam) * 0.3, ao=0.8 + 0.2 * seam, nstrength=3)
+
+
+def carpet():
+    n = fnoise(beta=0.1, lo=300, seed=51)
+    m = fnoise(beta=1.4, lo=2, seed=52)
+    albedo = np.stack([0.55 + n * 0.25 + m * 0.1] * 3, -1)
+    save('carpet', albedo, n, 0.97 + n * 0.03, nstrength=4)
+
+
+def fabric_tex():
+    y, x = np.mgrid[0:N, 0:N] / N
+    weave = (np.sin(x * np.pi * 2 * 160) * np.sin(y * np.pi * 2 * 160) + 1) / 2
+    n = fnoise(beta=0.6, lo=80, seed=61)
+    m = fnoise(beta=1.6, lo=2, seed=62)
+    albedo = np.stack([0.62 + weave * 0.12 + n * 0.12 + m * 0.08] * 3, -1)
+    save('fabric', albedo, weave * 0.5 + n * 0.5, 0.88 + n * 0.1, nstrength=3)
+
+
+def leather():
+    cells = fnoise(beta=0.2, lo=120, hi=400, seed=71)
+    m = fnoise(beta=1.8, lo=1, seed=72)
+    h = blur(cells, 1)
+    albedo = np.stack([0.6 + m * 0.2 + h * 0.15] * 3, -1)
+    save('leather', albedo, h, 0.38 + h * 0.2 + m * 0.1, nstrength=3)
+
+
+TARGETS = dict(woodfloor=woodfloor, wood=wood, tiles=tiles, marble=marble, carpet=carpet, fabric=fabric_tex, leather=leather, decals=decals, asphalt=asphalt, sidewalk=sidewalk, concrete=concrete, brick=brick, plaster=plaster, stone=stone, metal=metal, roof=roof, grass=grass)
 for k in (sys.argv[1:] or TARGETS):
     TARGETS[k]()

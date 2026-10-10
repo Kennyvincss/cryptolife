@@ -3,6 +3,9 @@
 import * as THREE from 'three';
 import { mat, roundedBox } from '../engine/build.js';
 import { artTexture, fabric } from '../engine/textures.js';
+import { surf } from './pbr.js';
+import { houseplantParts } from './trees.js';
+void fabric;
 
 type V = number;
 function box(g: THREE.Object3D, w: V, h: V, d: V, m: THREE.Material, x = 0, y = 0, z = 0, ry = 0) {
@@ -27,10 +30,13 @@ function cyl(g: THREE.Object3D, rt: V, rb: V, h: V, m: THREE.Material, x = 0, y 
   return mesh;
 }
 
+/** Brighten a colour (the PBR albedo textures are mid-grey, so tints need lifting). */
+const lift = (c: string, k: number) => '#' + new THREE.Color(c).multiplyScalar(k).getHexString();
+
 export const M = {
-  wood: () => mat('f_wood', { color: '#7a5233', roughness: 0.6 }),
-  darkWood: () => mat('f_dwood', { color: '#3d2a1e', roughness: 0.55 }),
-  lightWood: () => mat('f_lwood', { color: '#c49a6c', roughness: 0.6 }),
+  wood: () => surf('wood', { tile: 0.9, mode: 'wall', color: '#ffffff', macro: 0.05 }),
+  darkWood: () => surf('wood', { tile: 0.9, mode: 'wall', color: '#6e5a4c', macro: 0.05 }),
+  lightWood: () => surf('wood', { tile: 0.9, mode: 'wall', color: '#ffe4c4', macro: 0.05 }),
   white: () => mat('f_white', { color: '#f2f1ec', roughness: 0.5 }),
   black: () => mat('f_black', { color: '#141518', roughness: 0.45, metalness: 0.2 }),
   steel: () => mat('f_steel', { color: '#c4c8cc', roughness: 0.25, metalness: 0.9 }),
@@ -38,10 +44,10 @@ export const M = {
   gold: () => mat('f_gold', { color: '#d4af37', roughness: 0.25, metalness: 1 }),
   glass: () => mat('f_glass', { color: '#a8c8d8', roughness: 0.02, metalness: 0.1, transparent: true, opacity: 0.25 }),
   screenOff: () => mat('f_screen', { color: '#06070a', roughness: 0.08, metalness: 0.5 }),
-  leather: (c = '#3b2618') => mat('f_leather' + c, { color: c, roughness: 0.42 }),
-  fabric: (c = '#5a6270') => mat('f_fab' + c, { map: fabric(c), roughness: 0.92 }),
+  leather: (c = '#3b2618') => surf('leather', { tile: 0.6, mode: 'wall', color: lift(c, 1.35), macro: 0.05 }),
+  fabric: (c = '#5a6270') => surf('fabric', { tile: 0.5, mode: 'wall', color: lift(c, 1.35), macro: 0.08 }),
   porcelain: () => mat('f_porc', { color: '#fbfbf8', roughness: 0.15 }),
-  marbleTop: () => mat('f_mtop', { color: '#e9e6e0', roughness: 0.2 }),
+  marbleTop: () => surf('marble', { tile: 1.5, mode: 'wall', color: '#ffffff', macro: 0.03 }),
   plant: () => mat('f_leaf', { color: '#3f7a35', roughness: 0.9 }),
   pot: () => mat('f_pot', { color: '#b0603a', roughness: 0.8 }),
   emissive: (c: string, i = 2) => mat('f_em' + c + i, { color: c, emissive: c, emissiveIntensity: i, roughness: 0.4 }),
@@ -118,16 +124,16 @@ export function rug(w = 2.4, d = 1.7, c = '#8a4a3a') {
 export function plant(big = false) {
   const g = new THREE.Group();
   const s = big ? 1.6 : 1;
-  cyl(g, 0.2 * s, 0.15 * s, 0.4 * s, M.pot(), 0, 0.2 * s, 0, 12);
-  const leaf = M.plant();
-  for (let i = 0; i < 7; i++) {
-    const l = new THREE.Mesh(new THREE.SphereGeometry(0.2 * s, 8, 6), leaf);
-    const a = (i / 7) * Math.PI * 2;
-    l.position.set(Math.cos(a) * 0.15 * s, (0.6 + (i % 3) * 0.2) * s, Math.sin(a) * 0.15 * s);
-    l.scale.set(0.6, 1.4, 0.3);
-    l.rotation.set(Math.cos(a) * 0.5, a, Math.sin(a) * 0.5);
-    l.castShadow = true;
-    g.add(l);
+  cyl(g, 0.2 * s, 0.15 * s, 0.4 * s, M.pot(), 0, 0.2 * s, 0, 16);
+  cyl(g, 0.18 * s, 0.18 * s, 0.02, mat('soil', { color: '#2e2219', roughness: 1 }), 0, 0.39 * s, 0, 16);
+  // a real grown shrub instead of blobs
+  const hp = houseplantParts();
+  for (const [geo, m] of [[hp.branches, hp.bark], [hp.leaves, hp.leaf]] as const) {
+    const me = new THREE.Mesh(geo, m);
+    me.position.y = 0.38 * s;
+    me.scale.setScalar(s);
+    me.castShadow = true;
+    g.add(me);
   }
   return g;
 }
@@ -337,13 +343,58 @@ export function poolTable() {
   cols.forEach((c, i) => { const b = new THREE.Mesh(new THREE.SphereGeometry(0.03, 10, 8), mat('ball' + c, { color: c, roughness: 0.15 })); b.position.set(-0.4 + (i % 3) * 0.07 + (i > 2 ? 0.4 : 0), 0.925, -0.1 + Math.floor(i / 3) * 0.07); g.add(b); });
   return g;
 }
+/**
+ * Home gym: power rack with a loaded barbell on the J-hooks (squats), a flat
+ * bench with its own uprights and bar (bench press), a dumbbell rack, rubber
+ * flooring. userData.squatBar / benchBar / dumbbells are hidden while in use.
+ * Local layout (front = +z): rack at z -0.45, bench along z from 0.2 to 1.4,
+ * dumbbell rack on the left at x -1.15.
+ */
 export function gymRack() {
   const g = new THREE.Group();
-  for (const sx of [-0.6, 0.6]) box(g, 0.08, 2.2, 0.08, M.black(), sx, 1.1, 0);
-  box(g, 1.3, 0.08, 0.08, M.black(), 0, 2.2, 0);
-  cyl(g, 0.02, 0.02, 1.6, M.chrome(), 0, 1.4, 0.1, 8).rotation.z = Math.PI / 2;
-  for (const sx of [-0.7, 0.7]) cyl(g, 0.22, 0.22, 0.06, M.black(), sx, 1.4, 0.1, 20).rotation.z = Math.PI / 2;
-  box(g, 0.5, 0.1, 1.2, M.leather('#1d1d20'), 0, 0.45, 0.8);
+  const frame = mat('gym_frame', { color: '#1d1f22', roughness: 0.5, metalness: 0.7 });
+  const iron = mat('gym_iron', { color: '#1b1c1f', roughness: 0.45, metalness: 0.6 });
+  const steel = mat('gym_steel', { color: '#c9cdd2', roughness: 0.25, metalness: 1 });
+  const rubber = mat('gym_rubber', { color: '#202224', roughness: 0.95 });
+  const pad = M.leather('#141416');
+  box(g, 2.9, 0.02, 2.4, rubber, -0.35, 0.01, 0.3);
+  // power rack
+  for (const sx of [-0.62, 0.62]) for (const sz of [-0.95, 0.05]) box(g, 0.07, 2.3, 0.07, frame, sx, 1.15, sz - 0.0);
+  for (const sz of [-0.95, 0.05]) box(g, 1.31, 0.07, 0.07, frame, 0, 2.3, sz);
+  for (const sx of [-0.62, 0.62]) { box(g, 0.07, 0.07, 1.07, frame, sx, 2.3, -0.45); box(g, 0.07, 0.07, 1.07, frame, sx, 0.05, -0.45); }
+  for (const sx of [-0.62, 0.62]) box(g, 0.1, 0.06, 0.12, steel, sx, 1.33, 0.1);
+  const bar = (y: number, z: number) => {
+    const b = new THREE.Group();
+    const c = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.014, 2.0, 8), steel); c.rotation.z = Math.PI / 2; b.add(c);
+    for (const x of [-0.82, 0.82]) for (const [r, w, o] of [[0.22, 0.05, 1], [0.17, 0.04, 1.06]] as const) { const p = new THREE.Mesh(new THREE.CylinderGeometry(r, r, w, 20), iron); p.rotation.z = Math.PI / 2; p.position.x = x * o; p.castShadow = true; b.add(p); }
+    b.position.set(0, y, z);
+    g.add(b);
+    return b;
+  };
+  g.userData.squatBar = bar(1.4, 0.1);
+  // flat bench with uprights
+  box(g, 0.3, 0.09, 1.2, pad, 0, 0.45, 0.85);
+  box(g, 0.08, 0.4, 0.08, frame, 0, 0.2, 0.4); box(g, 0.08, 0.4, 0.08, frame, 0, 0.2, 1.3);
+  box(g, 0.5, 0.05, 0.08, frame, 0, 0.03, 0.4); box(g, 0.5, 0.05, 0.08, frame, 0, 0.03, 1.3);
+  for (const sx of [-0.55, 0.55]) { box(g, 0.06, 1.05, 0.06, frame, sx, 0.52, 0.32); box(g, 0.1, 0.06, 0.1, steel, sx, 1.02, 0.34); }
+  g.userData.benchBar = bar(1.07, 0.36);
+  // dumbbell rack (two tiers) on the left
+  box(g, 0.45, 0.04, 1.3, frame, -1.2, 0.45, 0.2); box(g, 0.45, 0.04, 1.3, frame, -1.2, 0.8, 0.2);
+  for (const sz of [-0.42, 0.82]) box(g, 0.45, 0.85, 0.05, frame, -1.2, 0.42, sz);
+  const dbs = new THREE.Group();
+  for (let i = 0; i < 6; i++) for (const tier of [0.5, 0.85]) {
+    const d = new THREE.Group();
+    const hnd = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, 0.3, 8), steel); hnd.rotation.z = Math.PI / 2; d.add(hnd);
+    const r = 0.045 + i * 0.006;
+    for (const x of [-0.1, 0.1]) { const p = new THREE.Mesh(new THREE.CylinderGeometry(r, r, 0.06, 6), iron); p.rotation.z = Math.PI / 2; p.position.x = x; d.add(p); }
+    d.position.set(-1.2, tier + r, -0.3 + i * 0.2);
+    d.rotation.y = Math.PI / 2;
+    dbs.add(d);
+  }
+  g.add(dbs);
+  g.userData.dumbbells = dbs.children[0];
+  // precise colliders [cx, cz, sx, sz] so you can step into the rack and up to the bench
+  g.userData.colliders = [[-0.62, -0.95, 0.15, 0.15], [0.62, -0.95, 0.15, 0.15], [-0.62, 0.05, 0.15, 0.15], [0.62, 0.05, 0.15, 0.15], [0, 0.85, 0.32, 1.1], [-1.2, 0.2, 0.45, 1.3]];
   return g;
 }
 export function homeBar() {

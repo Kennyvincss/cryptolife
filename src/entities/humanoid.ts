@@ -11,7 +11,7 @@ import { RigBody } from './rigbody.js';
 
 const BAKED_MAT = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.72, metalness: 0 });
 
-export type Anim = 'idle' | 'walk' | 'run' | 'sit' | 'sleep' | 'dance' | 'drive' | 'phone' | 'eat' | 'talk' | 'wave' | 'workout' | 'type' | 'ride';
+export type Anim = 'idle' | 'walk' | 'run' | 'sit' | 'sleep' | 'dance' | 'drive' | 'phone' | 'eat' | 'talk' | 'wave' | 'workout' | 'type' | 'ride' | 'bench' | 'curl' | 'squat';
 
 const capsule = (r: number, len: number, seg = 10) => new THREE.CapsuleGeometry(r, len, 4, seg);
 const sphere = (r: number, seg = 16) => new THREE.SphereGeometry(r, seg, Math.max(8, seg * 0.75));
@@ -316,6 +316,50 @@ export class Humanoid {
     this.setShadows(this.castShadows);
   }
 
+  // ---- gym weights held during lifts ----
+  private gymMesh: THREE.Group | null = null;
+  private gymKind: 'dumbbells' | 'barbell' | null = null;
+  setGymProp(kind: 'dumbbells' | 'barbell' | null) {
+    if (kind === this.gymKind) return;
+    this.gymMesh?.removeFromParent();
+    this.gymMesh = null;
+    this.gymKind = kind;
+    if (!kind) return;
+    const iron = mat('gym_iron', { color: '#1b1c1f', roughness: 0.45, metalness: 0.6 });
+    const steel = mat('gym_steel', { color: '#c9cdd2', roughness: 0.25, metalness: 1 });
+    const g = new THREE.Group();
+    const along = (geo: THREE.BufferGeometry, m: THREE.Material, x: number) => { const me = new THREE.Mesh(geo, m); me.rotation.z = Math.PI / 2; me.position.x = x; me.castShadow = true; return me; };
+    if (kind === 'dumbbells') {
+      for (const side of [0, 1]) {
+        const d = new THREE.Group();
+        d.add(along(new THREE.CylinderGeometry(0.016, 0.016, 0.3, 8), steel, 0));
+        for (const x of [-0.1, 0.1]) d.add(along(new THREE.CylinderGeometry(0.055, 0.055, 0.06, 6), iron, x));
+        d.name = side ? 'R' : 'L';
+        g.add(d);
+      }
+    } else {
+      g.add(along(new THREE.CylinderGeometry(0.014, 0.014, 2.0, 8), steel, 0));
+      for (const x of [-0.82, 0.82]) { g.add(along(new THREE.CylinderGeometry(0.22, 0.22, 0.05, 20), iron, x)); g.add(along(new THREE.CylinderGeometry(0.17, 0.17, 0.04, 18), iron, x * 1.06)); }
+    }
+    this.gymMesh = g;
+    this.root.add(g);
+  }
+  private placeGym() {
+    if (!this.gymMesh || !this.rig) return;
+    const l = new THREE.Vector3(), r = new THREE.Vector3();
+    this.root.updateMatrixWorld(true);
+    if (!this.rig.handPositions(l, r)) return;
+    this.root.worldToLocal(l); this.root.worldToLocal(r);
+    if (this.gymKind === 'dumbbells') {
+      this.gymMesh.getObjectByName('L')!.position.copy(l).add(new THREE.Vector3(0, -0.03, 0.03));
+      this.gymMesh.getObjectByName('R')!.position.copy(r).add(new THREE.Vector3(0, -0.03, 0.03));
+    } else {
+      this.gymMesh.position.copy(l).add(r).multiplyScalar(0.5);
+      // keep the bar level across the hands
+      this.gymMesh.rotation.set(0, 0, Math.atan2(r.y - l.y, r.x - l.x) + (r.x < l.x ? Math.PI : 0));
+    }
+  }
+
   /** Skip animation updates until `secs` have accumulated (crowd LOD). */
   setAnimStep(secs: number) { if (this.rig) this.rig.animStep = secs; }
 
@@ -482,7 +526,8 @@ export class Humanoid {
       this.rig.update(dt, anim, speed);
       const k = 1 - Math.exp(-dt * 12);
       this.body.position.y += (this.rig.bodyOffset(anim) - this.body.position.y) * k;
-      this.body.rotation.x += ((anim === 'sleep' ? -Math.PI / 2 : 0) - this.body.rotation.x) * k;
+      this.body.rotation.x += ((anim === 'sleep' || anim === 'bench' ? -Math.PI / 2 : 0) - this.body.rotation.x) * k;
+      this.placeGym();
       return;
     }
     const T = this.joints;

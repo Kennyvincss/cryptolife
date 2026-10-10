@@ -140,3 +140,10 @@ export class Forest {
     }
   }
 }
+
+let houseplant: Variant | null = null;
+/** A small real shrub (ez-tree) for potted indoor plants; grown once and shared. */
+export function houseplantParts() {
+  houseplant ??= grow({ preset: 'Bush 1', seed: 12, height: 0.95, leafScale: 1.5, park: false, bush: true, tint: '#5c9440' });
+  return houseplant;
+}

@@ -76,6 +76,7 @@ scene.add(headlight, headlight.target);
 let hud: HUD;
 let player: PlayerController;
 let carEntry: CarEntry;
+let liftEnd: (() => void) | null = null;
 let body: Humanoid;
 let zone = 'street';
 let interior: InteriorBuild | null = null;
@@ -299,6 +300,13 @@ Object.assign(api, {
   },
   setQuality: (q: 'low' | 'medium' | 'high') => { R.setQuality(q); env.setShadowSize(q === 'high' ? 4096 : 2048); env.setShadowExtent(q === 'high' ? 90 : 70); },
   placeAt: (p: THREE.Vector3, heading: number) => { player.stand(); player.teleport(p.clone().setY(0), heading); },
+  lift: (anim: Anim, prop: 'barbell' | 'dumbbells', p: THREE.Vector3, heading: number, onEnd?: () => void) => {
+    player.stand();
+    player.sit(p.clone().setY(0), heading, anim, 0.45);
+    body.setGymProp(prop);
+    liftEnd = onEnd ?? null;
+    toast('Move to stop.', 'ok');
+  },
   teleportLocal: (x: number, z: number, y = 0) => { if (interior) player.teleport(new THREE.Vector3(3000 + x, y, z), Math.PI); },
 });
 let pendingCar: string | null = null;
@@ -355,6 +363,7 @@ function start() {
   scene.add(body.root);
   player = new PlayerController(body, R.camera);
   carEntry = new CarEntry(player, (n) => audio.sfx(n));
+  player.onStand = () => { body.setGymProp(null); liftEnd?.(); liftEnd = null; };
   player.teleport(new THREE.Vector3(...PLAYER_SPAWN).setY(0.15), Math.PI / 2);
   hud = new HUD();
   hud.onMapClick = (x, z, label) => setWaypoint(x, z, label ?? 'Map marker');

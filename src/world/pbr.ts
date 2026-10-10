@@ -135,3 +135,12 @@ export function atlasQuad(w: number, h: number, tile: number, tiles = 4) {
   g.rotateX(-Math.PI / 2);
   return g;
 }
+
+const surfCache = new Map<string, THREE.MeshStandardMaterial>();
+/** Cached surfaceMaterial (identical name + options share one material). */
+export function surf(name: string, o: SurfaceOpts) {
+  const key = name + JSON.stringify(o);
+  let m = surfCache.get(key);
+  if (!m) { m = surfaceMaterial(name, o); surfCache.set(key, m); }
+  return m;
+}

@@ -73,6 +73,12 @@ Create an account on the sign-in screen, design your character, pick a career fo
 - Vehicles are 9 original models in 8 body styles, including a motorcycle. They have extruded body profiles, clearcoat paint, glass cabins, spoked rims, working head and brake lights, arcade physics, collisions, damage, and engine audio (electric cars whine).
 - NPC traffic follows right-hand lanes, turns at intersections, stops at red lights, follows the car ahead, brakes and honks for the player. Pedestrians walk the sidewalks and step aside. NPCs are always tagged **NPC**. Real players are tagged **PLAYER**.
 
+### Getting around
+- **Camera:** close, over-the-shoulder third person. Use the mouse wheel to zoom, or pinch on a phone.
+- **Map:** press M, tap 🗺, or tap the minimap. It opens a full-screen map you can drag, zoom and search. Tap a place or any spot, then press **Set destination** to draw a purple GPS route.
+- **Cars:** walk up to any parked car, or a traffic car stopped at a light, and press F. You walk to the driver's door, it opens, you get in and it closes. Press F again while driving to brake to a stop, open the door and get out. Cars you leave stay where you parked them.
+- **Busy streets:** traffic and pedestrians keep spawning around you (out of view), and the drivers of nearby cars are visible. Cars and people are solid.
+
 ### Everyday life
 - **Homes.** Every resident gets a free starter apartment. You can rent or buy a studio, standard, luxury, penthouse or mansion at Keystone Realty. Bigger homes have more rooms and furniture spots.
 - **Home interactions.** Sleep, lie down, sit on sofas, chairs and stools, change outfits at the wardrobe, edit your appearance at the mirror, use the computer (a desktop with all apps), grab a snack, cook, make coffee, shower or bath, read (research XP), watch CityNews on the TV, and play music on speakers. Visitors in the room hear speaker music.
@@ -153,7 +159,7 @@ src/
 | Real wallet / deposits / withdrawals | **Not implemented.** The wallet is simulated and labelled as such, and the Deposit/Withdraw buttons say so. | Integrate a reputable embedded-wallet provider server-side behind the existing `wallet.*` actions. Keep keys in the provider and never in the client. Add limits, recovery and fraud review. |
 | Real trading / DEX | **Not implemented.** Only the simulated market exists. | Add a separate "real market" module that uses an authorized trading API. It must never be mixed with simulated balances. |
 | Licensed music | Not integrated. All 18 tracks are original and generated in code (royalty-free). | `MusicSource` in `src/audio/music.ts` is the seam for a licensed catalog SDK. Shared playback in venues must follow that service's licensing rules. |
-| AAA graphics | There's a cinematic HDR pipeline and realistic buildings, trees and cars, but it is still a browser game rather than GTA V. There is only **one car model** (re-proportioned per body style and recoloured) and 2 character bodies. Buildings are generated (their facade detail and interiors come from a shader, not modelled geometry). Interiors still use simple untextured materials. On weak laptops the FPS governor drops quality. | More licensed car, character and prop models (the instanced car renderer and rig retargeter accept any glTF), hand-modelled landmark buildings, and a texture-streaming and LOD system. |
+| AAA graphics | There's a cinematic HDR pipeline and realistic buildings, trees and cars, but it is still a browser game rather than GTA V. There is only **one car model** (re-proportioned per body style and recoloured) and 2 character bodies. Buildings are generated (their facade detail and interiors come from a shader, not modelled geometry). Interior furniture is still built from simple shapes (now with real materials). On weak laptops the FPS governor drops quality. | More licensed car, character and prop models (the instanced car renderer and rig retargeter accept any glTF), hand-modelled landmark buildings, and a texture-streaming and LOD system. |
 | Anti-cheat | Economic outcomes are server-side, **but zone proximity trusts the position the client reports**. | Server-side movement validation (speed checks, interpolation) and authoritative physics for vehicles. |
 | Multiplayer scale | One Node process holds the world in memory. It works for a handful to dozens of players. Presence is broadcast at 10 Hz. | Shard by district or instance, move persistence to a database (Postgres/Redis), and add interest management. |
 | Vehicle damage | Shown as a condition percentage, which affects resale value and ride ratings. There's no visual deformation. | Damage decals and deformable panels. |
@@ -176,7 +182,7 @@ All other art and audio are generated in code. These files in `public/assets/` c
 | `hdri/night.exr` | Poly Haven, via `@pmndrs/assets` | CC0 |
 | `cars/concept_lod.glb`, `cars/concept_far.glb` | Khronos glTF-Sample-Assets "CarConcept" (from a public-domain model by Unity Fan) | CC0. Interior parts removed, decimated and textures downsized for real-time use. |
 | `src/vendor/ez-tree/` (tree generator plus its bark and leaf textures) | Daniel Greenheck, `@dgreenheck/ez-tree` 1.1.0 | MIT (license file included) |
-| `tex/*_albedo/_normal/_orm.jpg` (asphalt, sidewalk, concrete, brick, plaster, stone, metal, roof, grass) and `tex/decals_*` | Generated by this project with `tools/gen_textures.py` | Original |
+| `tex/*_albedo/_normal/_orm.jpg` (asphalt, sidewalk, concrete, brick, plaster, stone, metal, roof, grass, oak floor, timber, tiles, marble, carpet, fabric, leather) and `tex/decals_*` | Generated by this project with `tools/gen_textures.py` | Original |
 
 Before a commercial release, re-verify these terms or replace the files with assets you've commissioned or licensed.
 

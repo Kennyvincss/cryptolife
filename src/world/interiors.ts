@@ -12,6 +12,7 @@ import { buildVehicle } from '../entities/vehicle.js';
 import { act } from '../net/client.js';
 import { store } from '../state.js';
 import { Colliders } from './colliders.js';
+import { surf } from './pbr.js';
 import * as F from './furniture.js';
 import { chartScreen, newsScreen, textScreen, tickerScreen, type Screen } from './screens.js';
 
@@ -67,7 +68,13 @@ class Kit {
     obj.position.set(x, y, z);
     obj.rotation.y = rot;
     obj.updateMatrixWorld(true);
-    if (col === 'auto') {
+    const own = obj.userData.colliders as [number, number, number, number][] | undefined;
+    if (own && col !== false) {
+      for (const [cx, cz, sx, sz] of own) {
+        const wx = x + cx * Math.cos(rot) + cz * Math.sin(rot), wz = z - cx * Math.sin(rot) + cz * Math.cos(rot);
+        this.colliders.addRotated(INTERIOR_ORIGIN.x + wx, INTERIOR_ORIGIN.z + wz, sx, sz, rot, 'furniture');
+      }
+    } else if (col === 'auto') {
       const b = new THREE.Box3().setFromObject(obj);
       const sx = b.max.x - b.min.x, sz = b.max.z - b.min.z;
       if (b.min.y < 0.45 && b.max.y > 0.3 && sx > 0.12 && sz > 0.12) {
@@ -140,7 +147,7 @@ class Kit {
   }
 
   /** Box room; entrance is the gap in the +z wall at x=0. */
-  room(w: number, d: number, h: number, floor: THREE.Material, wall: THREE.Material, ceil: THREE.Material = mat('ceil', { color: '#efeeea', roughness: 0.9 }), doorW = 2.4) {
+  room(w: number, d: number, h: number, floor: THREE.Material, wall: THREE.Material, ceil: THREE.Material = surf('plaster', { tile: 3, mode: 'ground', color: '#ffffff', macro: 0.05 }), doorW = 2.4) {
     this.bounds = { minX: INTERIOR_ORIGIN.x - w / 2 + 0.35, maxX: INTERIOR_ORIGIN.x + w / 2 - 0.35, minZ: INTERIOR_ORIGIN.z - d / 2 + 0.35, maxZ: INTERIOR_ORIGIN.z + d / 2 - 0.35, maxY: h - 0.25 };
     this.B.add(planeUV(w, d, 1, 1), floor, { x: 0, y: 0, z: 0 }, 0, undefined, new THREE.Euler(-Math.PI / 2, 0, 0));
     this.B.add(new THREE.PlaneGeometry(w, d), ceil, { x: 0, y: h, z: 0 }, 0, undefined, new THREE.Euler(Math.PI / 2, 0, 0));
@@ -157,10 +164,16 @@ class Kit {
     this.spawn = this.w(0, d / 2 - 1.6);
     this.spawnRot = Math.PI;
     // baseboards
-    const bb = mat('baseboard', { color: '#e8e6e0', roughness: 0.6 });
-    this.box(w, 0.1, 0.03, bb, 0, 0.05, -d / 2 + 0.11);
-    this.box(0.03, 0.1, d, bb, -w / 2 + 0.11, 0.05, 0);
-    this.box(0.03, 0.1, d, bb, w / 2 - 0.11, 0.05, 0);
+    const bb = mat('baseboard', { color: '#ecebe6', roughness: 0.45 });
+    this.box(w, 0.12, 0.03, bb, 0, 0.06, -d / 2 + 0.11);
+    this.box(0.03, 0.12, d, bb, -w / 2 + 0.11, 0.06, 0);
+    this.box(0.03, 0.12, d, bb, w / 2 - 0.11, 0.06, 0);
+    // crown moulding where the walls meet the ceiling
+    const cm = mat('crown', { color: '#f4f3ef', roughness: 0.6 });
+    this.box(w, 0.08, 0.06, cm, 0, h - 0.04, -d / 2 + 0.12);
+    this.box(0.06, 0.08, d, cm, -w / 2 + 0.12, h - 0.04, 0);
+    this.box(0.06, 0.08, d, cm, w / 2 - 0.12, h - 0.04, 0);
+    this.box(w, 0.08, 0.06, cm, 0, h - 0.04, d / 2 - 0.12);
   }
 
   /** Axis-aligned wall from (x1,z1) to (x2,z2) with door gaps (offset along the wall from its center). */
@@ -225,12 +238,15 @@ function npcLines(name: string): string[] {
 }
 
 // ---------------------------------------------------------------------------
-const wallPaint = (c: [number, number, number]) => mat('wall' + c.join(), { map: plaster(c), roughness: 0.92 });
-const floorWood = (tone = 0) => mat('floorwood' + tone, { map: woodFloor(tone), roughness: 0.5, metalness: 0.02 });
-const floorMarble = (dark = false) => mat('floormarble' + dark, { map: marble(dark), roughness: 0.15, metalness: 0.05, envMapIntensity: 0.8 });
-const floorConcrete = () => mat('floorconc', { map: concreteFloor(), roughness: 0.6 });
-const floorTiles = (c = '#e8ecef') => mat('floortiles' + c, { map: tiles(c, '#9aa3aa', 8), roughness: 0.3 });
-const floorCarpet = (c: [number, number, number]) => mat('floorcarpet' + c.join(), { map: carpet(c), roughness: 1 });
+// Photoreal PBR surfaces (tools/gen_textures.py), world-aligned so any room size tiles cleanly.
+const rgbHex = (c: [number, number, number]) => '#' + c.map((v) => Math.round(v).toString(16).padStart(2, '0')).join('');
+const wallPaint = (c: [number, number, number]) => surf('plaster', { tile: 3, mode: 'wall', color: new THREE.Color(rgbHex(c)).multiplyScalar(1.12).getHexString().replace(/^/, '#'), macro: 0.1 });
+const floorWood = (tone = 0) => surf('woodfloor', { tile: 4, mode: 'ground', color: ['#ffffff', '#8c7464', '#ffeedd'][tone % 3] ?? '#ffffff', macro: 0.15 });
+const floorMarble = (dark = false) => surf('marble', { tile: 3, mode: 'ground', color: dark ? '#3a3a40' : '#ffffff', macro: 0.08 });
+const floorConcrete = () => surf('concrete', { tile: 4, mode: 'ground', color: '#c8c4bc', roughness: 0.7, macro: 0.2 });
+const floorTiles = (c = '#e8ecef') => surf('tiles', { tile: 2.4, mode: 'ground', color: c, macro: 0.05 });
+const floorCarpet = (c: [number, number, number]) => surf('carpet', { tile: 2, mode: 'ground', color: new THREE.Color(rgbHex(c)).multiplyScalar(1.5).getHexString().replace(/^/, '#'), macro: 0.1 });
+void plaster; void woodFloor; void marble; void concreteFloor; void tiles; void carpet;
 
 function nightish() { const m = ((store.clock.minutes % 1440) + 1440) % 1440; return m < 360 || m > 1200; }
 
@@ -506,7 +522,22 @@ function furnitureActs(k: Kit, model: string, name: string, x: number, z: number
     case 'arcade': use('Play the arcade', () => { faceIt(); api.panel('arcade'); }); break;
     case 'bookshelf': use('Read a book', () => { faceIt(); api.emote('phone', 6); home('read', '+Research XP from reading'); }); break;
     case 'rig': use('Use trading rig', () => { api.sit(front, rot + Math.PI, 'type', 0.5); api.panel('trade'); home('rig', 'Trading practice: +Trading XP'); }); break;
-    case 'gym': use('Work out', () => { faceIt(); api.emote('workout', 12); home('gym', 'Good workout — rested bonus (+10% XP).'); }); break;
+    case 'gym': {
+      // real lifts at the right spots: bench press, back squat, dumbbell curls
+      const P = (lx: number, lz: number) => [x + lx * Math.cos(rot) + lz * Math.sin(rot), z - lx * Math.sin(rot) + lz * Math.cos(rot)] as const;
+      const lift = (label: string, anim: 'bench' | 'squat' | 'curl', prop: 'barbell' | 'dumbbells', at: [number, number], stand: [number, number], face: number, hide: THREE.Object3D | undefined) => {
+        const [ax, az] = P(...at), [sx, sz] = P(...stand);
+        k.act(ax, az, label, () => {
+          if (hide) hide.visible = false;
+          api.lift(anim, prop, k.w(sx, sz), rot + face, () => { if (hide) hide.visible = true; });
+          home('gym', 'Good workout — rested bonus (+10% XP).');
+        }, 1.0, 'R');
+      };
+      lift('Bench press', 'bench', 'barbell', [0, 1.7], [0, 1.75], 0, obj.userData.benchBar);
+      lift('Barbell squats', 'squat', 'barbell', [0, -0.25], [0, -0.3], 0, obj.userData.squatBar);
+      lift('Dumbbell curls', 'curl', 'dumbbells', [-0.7, 0.2], [-0.72, 0.2], Math.PI / 2, obj.userData.dumbbells);
+      break;
+    }
     case 'bar': use('Mix a mocktail', () => { faceIt(); api.hold('glass'); api.toast('Citrus mocktail, alcohol-free.'); }); break;
     case 'pool': use('Play pool (snooker)', () => { faceIt(); api.panel('pool'); }); break;
     case 'piano': use('Play the piano', () => { api.sit(front, rot + Math.PI, 'type', 0.5); api.panel('piano'); }); break;
@@ -1015,7 +1046,7 @@ function customs(k: Kit, accent: string) {
     k.colliders.addBox(INTERIOR_ORIGIN.x + x, INTERIOR_ORIGIN.z - 4, 3.6, 5, 'lift', 3);
   }
   k.put(F.toolbox(), -10.5, 2, Math.PI / 2, 0, [0.5, 1]); k.put(F.toolbox(), 10.5, 2, -Math.PI / 2, 0, [0.5, 1]);
-  k.npc(-4, 1, 0.4, 'workout', 2001, 'Mechanic Hiro (NPC)');
+  k.npc(-4, 1, 0.4, 'idle', 2001, 'Mechanic Hiro (NPC)');
   k.put(F.kiosk(), 0, 4, Math.PI, 0, [0.6, 0.4]);
   k.act(0, 3.3, 'Customize & repair', () => api.panel('customs'), 1.6);
   k.npc(3, 5, Math.PI, 'idle', 2002, 'Service Desk (NPC)');

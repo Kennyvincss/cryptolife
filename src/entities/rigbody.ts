@@ -9,6 +9,7 @@ import type { Anim } from './humanoid.js';
 const CLIP_FOR: Record<Anim, RigClip> = {
   idle: 'idle', walk: 'walk', run: 'run', dance: 'dance', talk: 'agree', wave: 'idle', phone: 'idle',
   sit: 'idle', drive: 'idle', ride: 'idle', eat: 'idle', type: 'idle', sleep: 'idle', workout: 'idle',
+  bench: 'idle', curl: 'idle', squat: 'idle',
 };
 const SEATED = new Set<Anim>(['sit', 'drive', 'ride', 'eat', 'type']);
 
@@ -130,7 +131,7 @@ export class RigBody {
 
     // ease overlay weights
     const k = 1 - Math.exp(-dt * 10);
-    for (const key of ['sit', 'drive', 'ride', 'eat', 'type', 'phone', 'wave', 'workout', 'sleep'] as Anim[]) {
+    for (const key of ['sit', 'drive', 'ride', 'eat', 'type', 'phone', 'wave', 'workout', 'sleep', 'bench', 'curl', 'squat'] as Anim[]) {
       const cur = this.w.get(key) ?? 0;
       const target = key === anim ? 1 : 0;
       const v = cur + (target - cur) * k;
@@ -186,11 +187,55 @@ export class RigBody {
       this.turn('LeftArm', Z, (0.4 + s * 2.2) * wo); this.turn('RightArm', Z, -(0.4 + s * 2.2) * wo);
       for (const sd of ['Left', 'Right']) { this.turn(`${sd}UpLeg`, X, -0.7 * s * wo); this.turn(`${sd}Leg`, X, 1.2 * s * wo); }
     }
+
+    // ---- strength training (real lifts, weights placed by Humanoid.gymProp) ----
+    const curl = W('curl');
+    if (curl) {
+      // alternating dumbbell curls: upper arms at the sides, forearms flex up
+      const l = (Math.sin(this.phase * 2.6) + 1) / 2, r = (Math.sin(this.phase * 2.6 + Math.PI) + 1) / 2;
+      this.turn('LeftArm', X, -0.12 * curl); this.turn('RightArm', X, -0.12 * curl);
+      this.turn('LeftForeArm', X, -(0.15 + 2.0 * l) * curl); this.turn('RightForeArm', X, -(0.15 + 2.0 * r) * curl);
+    }
+    const sq = W('squat');
+    if (sq) {
+      // back squat: bar across the shoulders, hips back and down
+      const s = this.repPhase(2.2);
+      this.turn('Spine', X, 0.45 * s * sq);
+      for (const sd of ['Left', 'Right']) { this.turn(`${sd}UpLeg`, X, -1.25 * s * sq); this.turn(`${sd}Leg`, X, 1.9 * s * sq); this.turn(`${sd}Foot`, X, -0.6 * s * sq); }
+      this.turn('LeftArm', Z, 1.35 * sq); this.turn('RightArm', Z, -1.35 * sq);
+      this.turn('LeftArm', X, 0.35 * sq); this.turn('RightArm', X, 0.35 * sq);
+      this.turn('LeftForeArm', Z, 1.9 * sq); this.turn('RightForeArm', Z, -1.9 * sq);
+    }
+    const bp = W('bench');
+    if (bp) {
+      // bench press while lying on the back (the whole body is tilted by Humanoid)
+      const s = this.repPhase(1.9);
+      for (const sd of ['Left', 'Right']) {
+        const sg = sd === 'Left' ? 1 : -1;
+        this.turn(`${sd}Arm`, X, -(0.85 + 0.7 * s) * bp);
+        this.turn(`${sd}Arm`, Z, sg * 0.55 * (1 - s) * bp);
+        this.turn(`${sd}ForeArm`, X, -(1.4 * (1 - s)) * bp);
+        this.turn(`${sd}UpLeg`, X, -0.25 * bp); this.turn(`${sd}Leg`, X, 1.35 * bp);
+      }
+    }
+  }
+
+  /** 0 = bottom of the rep, 1 = top, with a pause at each end. */
+  private repPhase(speed: number) { const c = (Math.sin(this.phase * speed) + 1) / 2; return THREE.MathUtils.smoothstep(c, 0.08, 0.92); }
+
+  /** World positions of the hand bones (for placing held weights). */
+  handPositions(l: THREE.Vector3, r: THREE.Vector3) {
+    const lb = this.bones.get('LeftHand'), rb = this.bones.get('RightHand');
+    if (!lb || !rb) return false;
+    lb.getWorldPosition(l); rb.getWorldPosition(r);
+    return true;
   }
 
   bodyOffset(anim: Anim) {
     if (SEATED.has(anim)) return -this.hipHeight + 0.5;
     if (anim === 'workout') return -((Math.sin(this.phase * 5) + 1) / 2) * 0.22;
+    if (anim === 'squat') return -this.repPhase(2.2) * this.hipHeight * 0.42;
+    if (anim === 'bench') return 0.55; // lying on a 45 cm bench
     return 0;
   }
 
