@@ -3,6 +3,7 @@
 import {
   CLOTHING, CLOTHING_BY_ID, EYE_COLORS, FURNITURE, FURNITURE_BY_ID, HAIR_COLORS, HAIR_STYLES, MENUS, PAINTS, PAINT_PRICE, POOLS, PROPERTIES,
   PROPERTY_BY_ID, RIMS, SKIN_TONES, UPGRADE_PRICE, VEHICLES, VEHICLE_BY_ID, VIP_PRICE,
+  PEOPLE,
 } from '../../shared/catalog.js';
 import { FEATURE_BY_ZONE } from '../../shared/city.js';
 import type { Challenge, Look, ProjectRecord, Slot } from '../../shared/types.js';
@@ -87,11 +88,8 @@ const mirror: Panel = {
     const L = lookDraft();
     const set = (fn: () => void) => { fn(); api.previewLook(L); rr(); };
     add(el, h('small.muted', 'Appearance changes are free.'),
-      h('div.seg.small', btn('Masc', () => set(() => (L.body = 'm')), L.body === 'm' ? 'on' : ''), btn('Fem', () => set(() => (L.body = 'f')), L.body === 'f' ? 'on' : '')),
-      sub('Skin'), h('div.swatches', SKIN_TONES.map((c) => h('span.swatch' + (L.skin === c ? '.on' : ''), { style: { background: c }, onclick: () => set(() => (L.skin = c)) }))),
-      sub('Hair'), h('div.chips', HAIR_STYLES.map((n, i) => btn(n, () => set(() => (L.hairStyle = i)), L.hairStyle === i ? 'on small' : 'ghost small'))),
-      h('div.swatches', HAIR_COLORS.map((c) => h('span.swatch' + (L.hairColor === c ? '.on' : ''), { style: { background: c }, onclick: () => set(() => (L.hairColor = c)) }))),
-      sub('Eyes'), h('div.swatches', EYE_COLORS.map((c) => h('span.swatch' + (L.eyeColor === c ? '.on' : ''), { style: { background: c }, onclick: () => set(() => (L.eyeColor = c)) }))),
+      h('div.seg.small', btn('Masc', () => set(() => { L.body = 'm'; L.model = 0; }), L.body === 'm' ? 'on' : ''), btn('Fem', () => set(() => { L.body = 'f'; L.model = 0; }), L.body === 'f' ? 'on' : '')),
+      sub('Person'), h('div.chips', PEOPLE[L.body].map((p, i) => btn(p.name, () => set(() => (L.model = i)), (L.model ?? 0) === i ? 'on small' : 'ghost small'))),
       h('label.field', h('span', 'Height'), h('input', { type: 'range', min: 0.9, max: 1.1, step: 0.01, value: L.height, onchange: (e: Event) => set(() => (L.height = Number((e.target as HTMLInputElement).value))) })),
       h('label.field', h('span', 'Build'), h('input', { type: 'range', min: 0.85, max: 1.2, step: 0.01, value: L.build, onchange: (e: Event) => set(() => (L.build = Number((e.target as HTMLInputElement).value))) })),
       h('div.row', btn('Save', () => run(act('profile.setLook', { look: L }), 'Looking good').then(() => { draft = null; api.previewLook(null); }), 'primary'), btn('Reset', () => { draft = null; api.previewLook(null); rr(); }, 'ghost')));

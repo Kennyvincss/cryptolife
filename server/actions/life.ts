@@ -1,7 +1,7 @@
 // Everyday-life actions: identity, zones, homes, furniture, clothing, food, nightlife, sleep.
 
 import {
-  CLOTHING_BY_ID, FURNITURE_BY_ID, HAIR_COLORS, MENUS, PROPERTIES, PROPERTY_BY_ID, SKILLS, SKIN_TONES, EYE_COLORS, VIP_PRICE, levelFromXp,
+  CLOTHING_BY_ID, FURNITURE_BY_ID, HAIR_COLORS, MENUS, PROPERTIES, PROPERTY_BY_ID, SKILLS, SKIN_TONES, EYE_COLORS, VIP_PRICE, PEOPLE, levelFromXp,
 } from '../../shared/catalog.js';
 import { FEATURE_BY_ZONE, doorOf } from '../../shared/city.js';
 import type { Look, PublicProfile, Slot } from '../../shared/types.js';
@@ -34,6 +34,7 @@ function validateLook(u: UserRec, look: Look): Look {
   assert(look && typeof look === 'object', 'Invalid look');
   const out: Look = {
     body: look.body === 'f' ? 'f' : 'm',
+    model: clamp(Math.floor(Number(look.model) || 0), 0, PEOPLE[look.body === 'f' ? 'f' : 'm'].length - 1),
     skin: SKIN_TONES.includes(look.skin) ? look.skin : SKIN_TONES[3],
     hairStyle: clamp(Math.floor(Number(look.hairStyle) || 0), 0, 7),
     hairColor: HAIR_COLORS.includes(look.hairColor) ? look.hairColor : HAIR_COLORS[0],

@@ -1,7 +1,7 @@
 // Sign-in screen and character creator (with a live 3D preview).
 
 import * as THREE from 'three';
-import { CAREERS, CLOTHING_BY_ID, EYE_COLORS, HAIR_COLORS, HAIR_STYLES, SKIN_TONES, defaultLook } from '../../shared/catalog.js';
+import { CAREERS, PEOPLE, defaultLook } from '../../shared/catalog.js';
 import type { Career, Look } from '../../shared/types.js';
 import { Humanoid } from '../entities/humanoid.js';
 import { auth, netMode, tokenKey } from '../net/client.js';
@@ -84,17 +84,11 @@ export function characterCreator(initial?: Look, career: Career = 'Explorer'): P
     const sw = (colors: string[], get: () => string, set: (c: string) => void) => h('div.swatches', colors.map((c) => h('span.swatch' + (get() === c ? '.on' : ''), { style: { background: c }, onclick: () => { set(c); rebuild(); draw(); } })));
     const draw = () => {
       opts.innerHTML = '';
-      const starter = (slot: 'top' | 'bottom' | 'shoes') => CLOTHING_BY_ID[L.outfit[slot]!];
       add(opts,
-        h('h4', 'Body'), h('div.seg', btn('Masc', () => { L.body = 'm'; rebuild(); draw(); }, L.body === 'm' ? 'on' : ''), btn('Fem', () => { L.body = 'f'; rebuild(); draw(); }, L.body === 'f' ? 'on' : '')),
-        h('h4', 'Skin tone'), sw(SKIN_TONES, () => L.skin, (c) => (L.skin = c)),
-        h('h4', 'Hair'), h('div.chips', HAIR_STYLES.map((n, i) => btn(n, () => { L.hairStyle = i; rebuild(); draw(); }, L.hairStyle === i ? 'on small' : 'ghost small'))),
-        sw(HAIR_COLORS, () => L.hairColor, (c) => (L.hairColor = c)),
-        h('h4', 'Eyes'), sw(EYE_COLORS, () => L.eyeColor, (c) => (L.eyeColor = c)),
+        h('h4', 'Body'), h('div.seg', btn('Masc', () => { L.body = 'm'; L.model = 0; rebuild(); draw(); }, L.body === 'm' ? 'on' : ''), btn('Fem', () => { L.body = 'f'; L.model = 0; rebuild(); draw(); }, L.body === 'f' ? 'on' : '')),
+        h('h4', 'Who are you?'), h('div.chips', PEOPLE[L.body].map((p, i) => btn(p.name, () => { L.model = i; rebuild(); draw(); }, (L.model ?? 0) === i ? 'on small' : 'ghost small'))),
         h('label.field', h('span', 'Height'), h('input', { type: 'range', min: 0.9, max: 1.1, step: 0.01, value: L.height, onchange: (e: Event) => { L.height = Number((e.target as HTMLInputElement).value); rebuild(); } })),
         h('label.field', h('span', 'Build'), h('input', { type: 'range', min: 0.85, max: 1.2, step: 0.01, value: L.build, onchange: (e: Event) => { L.build = Number((e.target as HTMLInputElement).value); rebuild(); } })),
-        h('h4', 'Starter outfit'),
-        ...(['top', 'bottom', 'shoes'] as const).map((s) => h('div', h('small.muted', starter(s).name), sw(starter(s).colors, () => L.colors[s]!, (c) => (L.colors[s] = c)))),
         h('h4', 'Career focus (you can change any time)'),
         h('div.careers', CAREERS.map((c) => h('div.career' + (car === c.id ? '.on' : ''), { onclick: () => { car = c.id; draw(); } }, h('b', c.id), h('small', c.desc)))),
         h('div.row', btn('Wave', () => { anim = 'wave'; setTimeout(() => (anim = 'idle'), 2000); }, 'ghost'), btn('Dance', () => { anim = anim === 'dance' ? 'idle' : 'dance'; }, 'ghost')),

@@ -142,7 +142,7 @@ export class PlayerController {
 
     // walking
     const run = input.down('ShiftLeft') || input.down('ShiftRight');
-    const target = moving ? (run ? 5.6 : 2.3) : 0;
+    const target = moving ? (run ? 4.2 : 1.5) : 0;
     this.speed += (target - this.speed) * Math.min(1, dt * 8);
     if (moving) {
       const camF = new THREE.Vector3(-Math.sin(this.camYaw), 0, -Math.cos(this.camYaw));

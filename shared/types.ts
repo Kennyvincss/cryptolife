@@ -7,6 +7,8 @@ export type Slot = 'top' | 'bottom' | 'shoes' | 'hat' | 'glasses' | 'watch' | 'c
 
 export interface Look {
   body: 'm' | 'f';
+  /** Which person (index into PEOPLE[body]). */
+  model?: number;
   skin: string;
   hairStyle: number;
   hairColor: string;

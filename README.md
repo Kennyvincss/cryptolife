@@ -174,9 +174,8 @@ All other art and audio are generated in code. These files in `public/assets/` c
 
 | File | Source | License |
 |---|---|---|
-| `chars/male.glb` | three.js examples (`readyplayer.me.glb`), © Ready Player Me | As distributed with three.js examples. Hat and teeth removed, quantized. |
-| `chars/female.glb` | three.js examples (`Michelle.glb`), Mixamo character | Mixamo/Adobe terms (royalty-free in projects). Animations stripped, quantized. |
-| `chars/anim_soldier.glb`, `chars/anim_xbot.glb`, `chars/anim_samba.glb` | three.js examples (`Soldier.glb`, `Xbot.glb`, `Michelle.glb`) and Mixamo motion capture | Mixamo/Adobe terms. Meshes stripped, so these hold the skeleton and animation only. |
+| `people/*.glb` (17 people) | [Microsoft Rocketbox](https://github.com/microsoft/Microsoft-Rocketbox) avatars | MIT (© 2020 Microsoft, see `public/assets/people/LICENSE.md`). Converted from FBX to glTF; normal maps dropped. |
+| `people/anims_m.glb`, `people/anims_f.glb` | Microsoft Rocketbox motion capture (idle, walk, run, dance, talk, phone, wave, sit, cheer, shrug, look around) | MIT. Converted from FBX, trimmed, resampled and meshopt-compressed. |
 | `tex/waternormals.jpg` | three.js examples | MIT (three.js) |
 | `hdri/pedestrian_overpass_1k.hdr`, `hdri/venice_sunset_1k.hdr` | Poly Haven, via the three.js examples | CC0 |
 | `hdri/night.exr` | Poly Haven, via `@pmndrs/assets` | CC0 |

@@ -6,7 +6,7 @@ import type { Look } from '../../shared/types.js';
 import { mat, roundedBox } from '../engine/build.js';
 import { fabric } from '../engine/textures.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { rigsReady } from './rig.js';
+import { loadModel, modelLoaded, modelOf, rigsReady } from './rig.js';
 import { RigBody } from './rigbody.js';
 
 const BAKED_MAT = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.72, metalness: 0 });
@@ -295,6 +295,8 @@ export class Humanoid {
 
   private buildRig() {
     const L = this.look;
+    // stand-in body until this person's model has streamed in, then swap
+    if (!modelLoaded(L)) void loadModel(modelOf(L)).then((t) => { if (t && this.look === L && this.rig) this.setLook(L); });
     this.body.position.set(0, 0, 0);
     this.body.rotation.set(0, 0, 0);
     this.body.scale.setScalar(1);
@@ -303,8 +305,7 @@ export class Humanoid {
     this.hipHeight = this.rig.hipHeight;
     this.head.position.set(0, 0, 0);
     this.rig.head.add(this.head);
-    // the female body ships with its own hair; the male body is bald, so add a cut
-    if (L.body !== 'f') this.buildHair(L, mat('hair_' + L.hairColor, { color: L.hairColor, roughness: 0.75, metalness: 0.05 }));
+    // real people come with their own hair
     this.buildHat(L);
     this.buildGlasses(L);
     this.rHand.position.set(0, 0, 0);
@@ -684,6 +685,7 @@ export function randomLook(seed: number): Look {
   const cols = ['#f2f2f2', '#1c1c1f', '#3a5a8c', '#8c2f39', '#2f7d5b', '#d9a441', '#6b4ea8', '#e46f2e', '#9aa3ad', '#c8b48a', '#2d3a55'];
   const look: Look = {
     body: f ? 'f' : 'm',
+    model: Math.floor(r() * 20),
     skin: pickA(skins),
     hairStyle: f ? pickA([3, 4, 7, 1, 5]) : pickA([0, 1, 2, 5, 6, 1]),
     hairColor: pickA(hairs),
@@ -693,9 +695,9 @@ export function randomLook(seed: number): Look {
     outfit: { top, bottom, shoes: pickA(['sneakers', 'boots', 'loafers', 'runners']) },
     colors: { top: pickA(cols), bottom: pickA(['#2f4a7a', '#1b2233', '#c8b48a', '#1c1c1f', '#6f89b5', '#3a3a3a']), shoes: pickA(['#f2f2f2', '#1c1c1f', '#3b2618']) },
   };
-  if (r() < 0.2) { look.outfit.hat = pickA(['cap', 'beanie', 'bucket']); look.colors.hat = pickA(cols); }
+  if (r() < 0.08) { look.outfit.hat = pickA(['cap', 'beanie', 'bucket']); look.colors.hat = pickA(cols); }
   if (r() < 0.25) { look.outfit.glasses = pickA(['shades', 'round']); look.colors.glasses = '#111111'; }
-  if (r() < 0.25) { look.outfit.bag = pickA(['backpack', 'messenger']); look.colors.bag = pickA(cols); }
+  if (r() < 0.1) { look.outfit.bag = pickA(['backpack', 'messenger']); look.colors.bag = pickA(cols); }
   if (r() < 0.2) { look.outfit.watch = 'steel'; look.colors.watch = '#c0c6cc'; }
   return look;
 }

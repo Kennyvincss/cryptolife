@@ -111,6 +111,19 @@ export const STARTER_WARDROBE = ['tee', 'jeans', 'sneakers'];
 export const SKIN_TONES = ['#f6d7c3', '#ecc0a0', '#d9a57e', '#c58b62', '#a8704a', '#8a5636', '#6b3f26', '#4a2a19'];
 export const HAIR_COLORS = ['#1a1412', '#3b2618', '#6b4a2b', '#a87b4f', '#d8b880', '#e6e0d4', '#b33a2a', '#4fb3ff', '#ff5fb3'];
 export const EYE_COLORS = ['#3b2618', '#2f6b3a', '#2f5a9c', '#6b6f75'];
+/** Realistic people you can play as (Microsoft Rocketbox avatars, MIT). */
+export const PEOPLE: Record<'m' | 'f', { id: string; name: string }[]> = {
+  m: [
+    { id: 'Male_Adult_08', name: 'Mike' }, { id: 'Male_Adult_12', name: 'Marcus' }, { id: 'Male_Adult_10', name: 'Kenji' },
+    { id: 'Male_Adult_01', name: 'Ryan' }, { id: 'Male_Adult_05', name: 'Hank' }, { id: 'Male_Adult_03', name: 'Walter' },
+    { id: 'Business_Male_01', name: 'Daniel' }, { id: 'Business_Male_02', name: 'Wei' }, { id: 'Business_Male_03', name: 'Omar' },
+  ],
+  f: [
+    { id: 'Female_Adult_01', name: 'Emma' }, { id: 'Female_Adult_03', name: 'Mei' }, { id: 'Female_Adult_02', name: 'Sofia' },
+    { id: 'Female_Adult_05', name: 'Hana' }, { id: 'Female_Adult_11', name: 'Yuki' }, { id: 'Female_Adult_10', name: 'Amira' },
+    { id: 'Business_Female_01', name: 'Claire' }, { id: 'Business_Female_03', name: 'Olivia' },
+  ],
+};
 export const HAIR_STYLES = ['Buzz', 'Short', 'Spiky', 'Long', 'Bun', 'Afro', 'Bald', 'Ponytail'];
 
 export function defaultLook(body: 'm' | 'f' = 'm'): Look {

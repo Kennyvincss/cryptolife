@@ -12,7 +12,7 @@ import { enableLandscape } from './ui/orient.js';
 import { Renderer, type Quality } from './engine/renderer.js';
 import { Environment } from './engine/sky.js';
 import { Humanoid, randomLook, type Anim } from './entities/humanoid.js';
-import { loadRigs } from './entities/rig.js';
+import { loadModel, loadRigs, modelOf } from './entities/rig.js';
 import { fleet, loadCarModel } from './entities/carmodel.js';
 import { CarEntry } from './systems/carentry.js';
 import { DoorWalk } from './systems/doorwalk.js';
@@ -392,10 +392,12 @@ async function boot() {
   setLoading('Loading characters…');
   loading?.classList.remove('hidden');
   await rigs;
+  await loadModel(modelOf(me.look));
   populate();
   loading?.classList.add('hidden');
   if (isNew) {
     const r = await characterCreator(me.look, me.career);
+    await loadModel(modelOf(r.look));
     await run(act('profile.setLook', { look: r.look }));
     await run(act('profile.setCareer', { career: r.career }));
   }
