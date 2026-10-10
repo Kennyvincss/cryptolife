@@ -1,0 +1,76 @@
+[
+ {
+  "id": "golf",
+  "file": "volkswagen_golf_ii_opt.glb",
+  "length": 3.99,
+  "doors": 2,
+  "paintTol": 2.2
+ },
+ {
+  "id": "sonata",
+  "file": "hyundai_sonata_2009_opt.glb",
+  "length": 4.8,
+  "doors": 4
+ },
+ {
+  "id": "tucson",
+  "file": "hyundai_tucson_2015_opt.glb",
+  "length": 4.48,
+  "doors": 4
+ },
+ {
+  "id": "creta",
+  "file": "hyundai_creta_2016_opt.glb",
+  "length": 4.27,
+  "doors": 4
+ },
+ {
+  "id": "civic",
+  "file": "honda_civic_type_r_2024_opt.glb",
+  "length": 4.6,
+  "doors": 4
+ },
+ {
+  "id": "f150",
+  "file": "ford_f150_raptor_2018_opt.glb",
+  "length": 5.9,
+  "doors": 4,
+  "fwd": "-z"
+ },
+ {
+  "id": "cayman",
+  "file": "porsche_cayman_s_2014_opt.glb",
+  "length": 4.38,
+  "doors": 2
+ },
+ {
+  "id": "taycan",
+  "file": "porsche_taycan_turbo_s_opt.glb",
+  "length": 4.96,
+  "doors": 4
+ },
+ {
+  "id": "granturismo",
+  "file": "maserati_granturismo_opt.glb",
+  "length": 4.88,
+  "doors": 2
+ },
+ {
+  "id": "mclaren",
+  "file": "mclaren_720s_2017_opt.glb",
+  "length": 4.54,
+  "doors": 2
+ },
+ {
+  "id": "elantra",
+  "file": "hyundai_elantra_n_2022_opt.glb",
+  "length": 4.68,
+  "doors": 4
+ },
+ {
+  "id": "rs7",
+  "file": "audi_rs7_2014_opt.glb",
+  "length": 5.01,
+  "doors": 4
+ }
+]

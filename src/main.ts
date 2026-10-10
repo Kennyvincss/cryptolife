@@ -99,7 +99,7 @@ let lookKey = '';
 let lastDamageSend = 0;
 
 // rides
-let rideCar: { car: Car; path: THREE.Vector3[]; idx: number; mode: 'pickup' | 'trip' | 'leave'; rideId: string } | null = null;
+let rideCar: { car: Car; path: THREE.Vector3[]; idx: number; mode: 'pickup' | 'trip' | 'leave' | 'dropoff'; rideId: string } | null = null;
 let npcPassenger: { h: Humanoid; rideId: string; boarded: boolean } | null = null;
 
 // ------------------------------------------------------------------ zones
@@ -254,6 +254,37 @@ function leaveCar() {
   audio.engineSound(false);
   audio.sfx('door');
   if (music.output === 'car') music.setOutput('headphones');
+}
+
+/** Ride along in a traffic car's passenger seat; the NPC keeps driving its route. */
+let riding: Car | null = null;
+let ridingStop = false;
+function rideAlong(car: Car) {
+  if (carEntry.busy) return;
+  player.stand();
+  traffic.hold(car, true);
+  carEntry.enter(car, () => {
+    player.mode = 'passenger';
+    player.ride = car;
+    riding = car;
+    ridingStop = false;
+    traffic.hold(car, false);
+    toast('Riding along. Press F to ask the driver to pull over.', 'ok');
+  }, 'R');
+}
+/** Passenger: wait for the car to stop, open the door, get out. */
+function stopRiding(now = false) {
+  const c = riding;
+  if (!c) return;
+  if (!now) { ridingStop = true; traffic.hold(c, true); return; }
+  riding = null; ridingStop = false;
+  player.ride = null;
+  carEntry.exit(c, () => {
+    const p = carEntry.exitPoint(c);
+    player.mode = 'walk';
+    player.teleport(p.setY(city.groundAt(p.x, p.z)), c.heading);
+    setTimeout(() => traffic.hold(c, false), 1500);
+  }, 'R');
 }
 
 /** Cars the player took from the street (parked or traffic); left where they were parked. */
@@ -460,6 +491,8 @@ function start() {
     time(m: number | null) { timeOverride.minutes = m; },
     enter: (z: string) => enterZone(z),
     exit: () => exitBuilding(),
+    rideAlong: (c: Car) => rideAlong(c), stopRiding: (now?: boolean) => stopRiding(now),
+    spawnCar(model: string, color: string, x: number, z: number, h: number) { const c = new Car(model, color); c.setPose(x, z, h); scene.add(c.root); return c; },
     get doorWalk() { return doorWalk; }, walkOut: () => walkOut(), walkIn: (z: string) => { const d = city.doors.find((x) => x.zone === z); if (d) walkIn(d); },
   };
 }
@@ -520,28 +553,29 @@ function updateRides(dt: number) {
       const curb = nearestCurb(dest.x, dest.z);
       rc.path = pathTo(rc.car.pos, new THREE.Vector3(curb[0], 0, curb[2]));
       rc.idx = 0;
-      player.mode = 'passenger';
-      body.root.visible = false;
+      if (player.mode !== 'script') { player.mode = 'passenger'; player.ride = rc.car; }
     }
     if (rc.mode === 'trip' && player.mode === 'passenger') {
       const done = driveAlong(rc, dt, 13);
-      player.pos.copy(rc.car.pos);
-      body.root.position.copy(rc.car.pos);
       if (done) {
-        player.mode = 'walk';
-        body.root.visible = true;
-        const side = new THREE.Vector3(Math.cos(rc.car.heading), 0, -Math.sin(rc.car.heading)).multiplyScalar(2.2);
-        const p = rc.car.pos.clone().add(side);
-        player.teleport(p.setY(city.groundAt(p.x, p.z)), rc.car.heading);
-        run(act('ride.complete')).then((res) => { if (res) toast(`Arrived at ${r.destName}. Fare charged: $${r.fare} (simulated).`, 'money'); });
-        rc.mode = 'leave';
-        rc.path = pathTo(rc.car.pos, rc.car.pos.clone().add(new THREE.Vector3(200, 0, 0)));
-        rc.idx = 0;
+        // pull up, open the passenger door, step out
+        rc.mode = 'dropoff';
+        rc.car.speed = 0;
+        player.ride = null;
+        carEntry.exit(rc.car, () => {
+          const p = carEntry.exitPoint(rc.car);
+          player.mode = 'walk';
+          player.teleport(p.setY(city.groundAt(p.x, p.z)), rc.car.heading);
+          run(act('ride.complete')).then((res) => { if (res) toast(`Arrived at ${r.destName}. Fare charged: $${r.fare} (simulated).`, 'money'); });
+          rc.mode = 'leave';
+          rc.path = pathTo(rc.car.pos, rc.car.pos.clone().add(new THREE.Vector3(200, 0, 0)));
+          rc.idx = 0;
+        }, 'R');
       }
     }
   } else if (rideCar && rideCar.mode !== 'leave') {
     // cancelled / completed elsewhere
-    if (player.mode === 'passenger' && !(r && r.role === 'rider' && !r.driverIsNpc)) { player.mode = 'walk'; body.root.visible = true; }
+    if (player.mode === 'passenger' && !riding && !(r && r.role === 'rider' && !r.driverIsNpc)) { player.mode = 'walk'; player.ride = null; body.root.visible = true; }
     rideCar.mode = 'leave';
     rideCar.path = pathTo(rideCar.car.pos, rideCar.car.pos.clone().add(new THREE.Vector3(200, 0, 0)));
     rideCar.idx = 0;
@@ -554,7 +588,7 @@ function updateRides(dt: number) {
   if (r && r.role === 'rider' && !r.driverIsNpc && r.status === 'onboard') {
     const v = remotes.vehicleOf(r.driverName);
     if (v) { player.mode = 'passenger'; body.root.visible = false; player.pos.copy(v.position); body.root.position.copy(v.position); }
-  } else if (player.mode === 'passenger' && !rideCar) { player.mode = 'walk'; body.root.visible = true; }
+  } else if (player.mode === 'passenger' && !rideCar && !riding) { player.mode = 'walk'; body.root.visible = true; }
 
   // ---- we are the driver
   if (r && r.role === 'driver' && r.riderIsNpc && ['assigned', 'onboard'].includes(r.status)) {
@@ -666,12 +700,23 @@ function loop(now: number) {
   let gAction: (() => void) | null = null;
   if (zone === 'street') {
     if (player.mode === 'drive') { extra.push(Math.abs(player.car?.speed ?? 0) > 1 ? 'F Stop & get out' : 'F Get out'); fAction = () => getOut(); }
+    else if (player.mode === 'passenger' && riding) {
+      extra.push(ridingStop ? 'Pulling over…' : 'F Ask the driver to pull over');
+      if (!ridingStop) fAction = () => stopRiding();
+      else if (Math.abs(riding.speed) < 0.3) stopRiding(true);
+    }
     else if (player.mode === 'walk' || player.mode === 'seated') {
       const r = store.me?.ride;
-      if (rideCar && r?.status === 'arrived' && rideCar.car.pos.distanceTo(player.pos) < 6.5) { extra.push('F Get in your CityRide'); fAction = () => run(act('ride.board')); }
+      if (rideCar && r?.status === 'arrived' && rideCar.car.pos.distanceTo(player.pos) < 6.5) {
+        extra.push('F Get in your CityRide');
+        const rc = rideCar;
+        fAction = () => { if (carEntry.busy) return; player.stand(); carEntry.enter(rc.car, () => { player.mode = 'passenger'; player.ride = rc.car; run(act('ride.board')).then((ok) => { if (!ok) { player.mode = 'walk'; player.ride = null; } }); }, 'R'); };
+      }
       else {
         const en = nearestEnterable();
         if (en) { extra.push('F ' + en.label); fAction = en.go; }
+        const tc = player.mode === 'walk' ? traffic?.stoppedNear(player.pos, 4.2) : null;
+        if (tc && !tc.visual.isMoto) { extra.push('G Ride along as passenger'); gAction = () => rideAlong(tc); }
       }
     }
   }

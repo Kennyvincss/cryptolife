@@ -32,7 +32,7 @@ export class Traffic {
 
   private spawned = 0;
   private addAgent() {
-    const models = ['pico', 'ledger', 'ampere', 'bastion', 'ledger', 'regent', 'mirage', 'pico', 'byte'];
+    const models = ['ledger', 'npc_creta', 'pico', 'npc_civic', 'bastion', 'npc_f150', 'npc_elantra', 'ampere', 'ledger', 'regent', 'npc_granturismo', 'byte', 'npc_civic', 'mirage'];
     const paints = ['#c8d1d8', '#111114', '#2d3a55', '#8c2f39', '#f2f2f2', '#3d4247', '#7d8287', '#1c2a3f', '#d9d4c7', '#5a1a1f'];
     const k = this.spawned++;
     const i = Math.floor(Math.random() * (COLS + 1)), j = Math.floor(Math.random() * (ROWS + 1));
@@ -45,6 +45,10 @@ export class Traffic {
     this.agents.push(a);
     return a;
   }
+
+  private held = new Set<Car>();
+  /** Make a car pull over and wait (someone getting in or out). */
+  hold(car: Car, on: boolean) { if (on) this.held.add(car); else this.held.delete(car); }
 
   /** Nearest traffic car within `r` that is slow enough to get into. */
   stoppedNear(pos: THREE.Vector3, r: number) {
@@ -130,7 +134,7 @@ export class Traffic {
     // keep traffic around the player: recycle one distant car at a time
     if (t > this.respawnAt) {
       this.respawnAt = t + 0.4;
-      const far = this.agents.filter((a) => a.car.pos.distanceTo(focus) > 200);
+      const far = this.agents.filter((a) => a.car.pos.distanceTo(focus) > 200 && !this.held.has(a.car));
       // after a teleport or leaving a building most cars are far: move several at once
       for (const a of far.slice(0, far.length > this.agents.length / 2 ? far.length : 1)) this.respawnNear(a, focus, camDir);
     }
@@ -167,6 +171,7 @@ export class Traffic {
           if (ahead < 7 && t > a.honk) { a.honk = t + 6 + Math.random() * 6; if (!far && ahead < 9) onHonk?.(); }
         }
       }
+      if (this.held.has(a.car)) target = 0;
       a.v += (target - a.v) * Math.min(1, dt * (target < a.v ? 4 : 1.5));
       if (far) a.v = Math.max(a.v, 6);
       a.s += a.v * dt;

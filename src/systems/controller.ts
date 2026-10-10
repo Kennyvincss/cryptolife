@@ -17,6 +17,8 @@ export class PlayerController {
   anim: Anim = 'idle';
   speed = 0;
   car: Car | null = null;
+  /** Car the player rides in as a passenger (front passenger seat). */
+  ride: Car | null = null;
   camYaw = 0;
   camPitch = 0.16;
   camDist = 3.3;
@@ -136,6 +138,23 @@ export class PlayerController {
     }
 
     if (this.mode === 'passenger') {
+      const c = this.ride;
+      if (c) {
+        const seat = c.visual.seatR ?? new THREE.Vector3(-c.visual.seat.x, c.visual.seat.y, c.visual.seat.z);
+        const off = seat.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), c.heading);
+        this.pos.copy(c.pos);
+        this.heading = c.heading;
+        this.body.root.position.copy(c.pos).add(off);
+        this.body.root.rotation.set(0, c.heading, 0);
+        this.body.update(dt, 'sit');
+        if (performance.now() - this.lastMouse > 1500) {
+          let d = c.heading + Math.PI - this.camYaw;
+          d = Math.atan2(Math.sin(d), Math.cos(d));
+          this.camYaw += d * Math.min(1, dt * 2);
+        }
+        this.updateCamera(dt, colliders, 1.4, Math.max(this.camDist, c.visual.dims.L * 1.35));
+        return;
+      }
       this.updateCamera(dt, colliders, 1.4, Math.max(this.camDist, 7));
       return;
     }
@@ -188,6 +207,7 @@ export class PlayerController {
   private updateCamera(dt: number, colliders: Colliders | null, height: number, dist = this.camDist) {
     const look = new THREE.Vector3(this.body.root.position.x, this.body.root.position.y + height, this.body.root.position.z);
     if (this.mode === 'drive' && this.car) look.set(this.car.pos.x, this.car.pos.y + height, this.car.pos.z);
+    else if (this.mode === 'passenger' && this.ride) look.set(this.ride.pos.x, this.ride.pos.y + height, this.ride.pos.z);
     else if (this.mode === 'walk' && dist < 6) {
       // GTA-style framing: look past the character's right shoulder
       const s = this.shoulder * THREE.MathUtils.clamp((6 - dist) / 3, 0, 1);

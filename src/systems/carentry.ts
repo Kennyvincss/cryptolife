@@ -6,7 +6,7 @@ import type { Car } from '../entities/vehicle.js';
 import type { PlayerController } from './controller.js';
 
 type Phase = 'approach' | 'open' | 'in' | 'close' | 'brake' | 'xopen' | 'out' | 'xclose';
-interface Seq { car: Car; phase: Phase; t: number; done: () => void; from: THREE.Vector3; fromH: number }
+interface Seq { car: Car; phase: Phase; t: number; done: () => void; from: THREE.Vector3; fromH: number; side: 'L' | 'R' }
 
 const UP = new THREE.Vector3(0, 1, 0);
 const ease = (t: number) => t * t * (3 - 2 * t);
@@ -22,32 +22,40 @@ export class CarEntry {
   private local(c: Car, x: number, y: number, z: number) {
     return new THREE.Vector3(x, y, z).applyAxisAngle(UP, c.heading).add(c.pos);
   }
+  private side: 'L' | 'R' = 'L';
+  private seatOf(c: Car) { return this.side === 'R' && c.visual.seatR ? c.visual.seatR : c.visual.seat; }
   private doorPoint(c: Car) {
     const d = c.visual.dims;
-    return c.visual.isMoto ? this.local(c, 0.85, 0, 0) : this.local(c, d.W / 2 + 0.5, 0, -0.45);
+    if (c.visual.isMoto) return this.local(c, 0.85, 0, 0);
+    const s = this.seatOf(c);
+    return this.local(c, (this.side === 'L' ? 1 : -1) * (d.W / 2 + 0.45), 0, s.z - 0.1);
   }
-  private seatPoint(c: Car) { const s = c.visual.seat; return this.local(c, s.x, s.y, s.z); }
+  private seatPoint(c: Car) { const s = this.seatOf(c); return this.local(c, s.x, s.y, s.z); }
 
-  enter(car: Car, done: () => void) {
+  /** Walk to the driver's (L) or passenger's (R) door, open it, sit down, close it. */
+  enter(car: Car, done: () => void, side: 'L' | 'R' = 'L') {
     const p = this.player;
-    this.seq = { car, phase: 'approach', t: 0, done, from: p.pos.clone(), fromH: p.heading };
+    this.side = side;
+    this.seq = { car, phase: 'approach', t: 0, done, from: p.pos.clone(), fromH: p.heading, side };
     p.mode = 'script';
     p.script.pos.copy(p.pos);
     p.script.heading = p.heading;
     p.script.camDist = 0;
   }
 
-  exit(car: Car, done: () => void) {
+  exit(car: Car, done: () => void, side: 'L' | 'R' = 'L') {
     const p = this.player;
-    this.seq = { car, phase: Math.abs(car.speed) > 0.6 ? 'brake' : 'xopen', t: 0, done, from: this.seatPoint(car), fromH: car.heading };
+    this.side = side;
+    this.seq = { car, phase: Math.abs(car.speed) > 0.6 && side === 'L' ? 'brake' : 'xopen', t: 0, done, from: this.seatPoint(car), fromH: car.heading, side };
     p.mode = 'script';
     p.script.pos.copy(this.seatPoint(car));
     p.script.heading = car.heading;
-    p.script.anim = car.visual.isMoto ? 'ride' : 'drive';
+    p.script.anim = car.visual.isMoto ? 'ride' : side === 'R' ? 'sit' : 'drive';
     p.script.camDist = Math.max(p.camDist, car.visual.dims.L * 1.35);
   }
 
-  private setDoor(c: Car, v: number) { if (c.visual.doors) c.visual.doors.L = THREE.MathUtils.clamp(v, 0, 1); }
+  private setDoor(c: Car, v: number) { if (c.visual.doors) c.visual.doors[this.side] = THREE.MathUtils.clamp(v, 0, 1); }
+  private seatedAnim(moto: boolean) { return moto ? 'ride' : this.side === 'R' ? 'sit' : 'drive'; }
 
   update(dt: number) {
     const s = this.seq;
@@ -55,7 +63,7 @@ export class CarEntry {
     const p = this.player, sc = p.script, c = s.car;
     const moto = c.visual.isMoto;
     s.t += dt;
-    const faceSide = c.heading - Math.PI / 2; // facing the driver's door from outside
+    const faceSide = c.heading + (s.side === 'L' ? -Math.PI / 2 : Math.PI / 2); // facing the door from outside
     switch (s.phase) {
       case 'approach': {
         const target = this.doorPoint(c);
@@ -80,7 +88,7 @@ export class CarEntry {
         const k = ease(Math.min(1, s.t / (moto ? 0.45 : 0.75)));
         sc.pos.copy(this.doorPoint(c)).lerp(this.seatPoint(c), k);
         sc.heading = faceSide + (c.heading - faceSide) * k;
-        sc.anim = moto ? 'ride' : 'drive'; sc.speed = 0;
+        sc.anim = this.seatedAnim(moto); sc.speed = 0;
         sc.camDist = THREE.MathUtils.lerp(p.camDist, Math.max(p.camDist, c.visual.dims.L * 1.35), k);
         if (k >= 1) this.next(moto ? null : 'close');
         break;
@@ -115,7 +123,7 @@ export class CarEntry {
         const k = ease(Math.min(1, s.t / (moto ? 0.45 : 0.75)));
         sc.pos.copy(this.seatPoint(c)).lerp(this.doorPoint(c), k);
         sc.heading = c.heading + (faceSide + Math.PI - c.heading) * k;
-        sc.anim = k < 0.5 ? (moto ? 'ride' : 'drive') : 'idle';
+        sc.anim = k < 0.5 ? this.seatedAnim(moto) : 'idle';
         sc.camDist = THREE.MathUtils.lerp(sc.camDist, p.camDist, Math.min(1, dt * 3));
         if (k >= 1) this.next(moto ? null : 'xclose');
         break;
@@ -134,7 +142,7 @@ export class CarEntry {
     const s = this.seq!;
     if (!phase) {
       this.seq = null;
-      if (s.car.visual.doors) s.car.visual.doors.L = 0;
+      if (s.car.visual.doors) s.car.visual.doors[s.side] = 0;
       s.done();
       return;
     }

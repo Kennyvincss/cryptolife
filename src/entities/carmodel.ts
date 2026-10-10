@@ -1,237 +1,241 @@
-// Realistic cars: one CC0 glTF car (Khronos "CarConcept", decimated) rendered
-// for every vehicle with GPU instancing. Each Car keeps a light-weight transform
-// hierarchy (root + wheel holders/spinners); the fleet copies those transforms
-// into instanced meshes once per frame, so 30 cars cost ~40 draw calls total.
+// Realistic cars: a dozen CC-BY glTF car models (see README credits), each
+// normalised offline (tools/cars) into body / opening front doors / one wheel,
+// and rendered for every vehicle with GPU instancing. Each Car keeps a light
+// transform hierarchy (root + wheel holders/spinners); the fleet copies those
+// transforms into instanced meshes once per frame (per model and LOD).
 // Paint, rim colour, head and brake lights are per-instance colours.
 
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 
 type WheelId = 'FL' | 'FR' | 'RL' | 'RR';
-interface Part { geo: THREE.BufferGeometry; mat: THREE.Material; role: 'paint' | 'rim' | 'brake' | 'head' | 'plain' }
+type Role = 'paint' | 'glass' | 'trim' | 'chrome' | 'head' | 'brake' | 'rim' | 'tyre';
+interface Part { geo: THREE.BufferGeometry; mat: THREE.Material; role: Role }
 interface Template {
+  id: string;
   body: Part[];
-  /** Hinged doors (driver = L, passenger = R): parts are relative to the hinge pivot. */
-  doors: Record<'L' | 'R', { pivot: THREE.Vector3; parts: Part[] }>;
-  wheels: Record<WheelId, { center: THREE.Vector3; parts: Part[] }>;
+  /** Hinged front doors (driver = L at +X, passenger = R): parts are relative to the hinge pivot. */
+  doors: Partial<Record<'L' | 'R', { pivot: THREE.Vector3; parts: Part[] }>>;
+  /** One wheel (the front-left), centred at its hub, axle along X. */
+  wheel: Part[];
+  wheels: Record<WheelId, THREE.Vector3>;
+  radius: number;
   size: THREE.Vector3;
+  seat: THREE.Vector3;
+  seatR: THREE.Vector3;
 }
 
-let template: Template | null = null;
-let templateFar: Template | null = null;
+/** Model files (public/assets/cars/<id>.glb and <id>_far.glb). */
+export const CAR_MODELS = ['golf', 'sonata', 'tucson', 'creta', 'civic', 'f150', 'cayman', 'taycan', 'granturismo', 'mclaren', 'elantra', 'rs7'] as const;
+export type CarModelId = (typeof CAR_MODELS)[number];
+/** Which model each catalogue vehicle uses. */
+const FOR_VEHICLE: Record<string, CarModelId> = { pico: 'golf', ledger: 'sonata', ampere: 'taycan', bastion: 'tucson', mirage: 'cayman', regent: 'rs7', halving: 'mclaren' };
+const FOR_BODY: Record<string, CarModelId> = { hatch: 'golf', sedan: 'sonata', ev: 'taycan', suv: 'tucson', sports: 'cayman', luxury: 'rs7', super: 'mclaren' };
+export function carModelFor(vehicleId: string, body: string): CarModelId {
+  if (vehicleId.startsWith('npc_')) { const m = vehicleId.slice(4) as CarModelId; if (CAR_MODELS.includes(m)) return m; }
+  return FOR_VEHICLE[vehicleId] ?? FOR_BODY[body] ?? 'sonata';
+}
+
+const near = new Map<CarModelId, Template>();
+const far = new Map<CarModelId, Template>();
 let loading: Promise<boolean> | null = null;
-export const carModelReady = () => !!template;
+export const carModelReady = () => near.size > 0;
 
-/** Dequantize to plain float attributes so parts can be merged. */
-function plain(g: THREE.BufferGeometry, m: THREE.Matrix4) {
-  const out = new THREE.BufferGeometry();
-  for (const name of ['position', 'normal', 'uv'] as const) {
-    const a = g.getAttribute(name) as THREE.BufferAttribute | undefined;
-    if (!a) { if (name === 'uv') out.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(g.getAttribute('position').count * 2), 2)); continue; }
-    const arr = new Float32Array(a.count * a.itemSize);
-    for (let i = 0; i < a.count; i++) for (let k = 0; k < a.itemSize; k++) arr[i * a.itemSize + k] = a.getComponent(i, k);
-    out.setAttribute(name, new THREE.BufferAttribute(arr, a.itemSize));
-  }
-  if (g.index) out.setIndex(Array.from(g.index.array as ArrayLike<number>));
-  out.applyMatrix4(m);
-  return out;
-}
-
-function roleOf(m: THREE.Material): Part['role'] {
-  const n = m.name;
-  if (/^Paint 1/.test(n)) return 'paint';
-  if (/^Rim/.test(n)) return 'rim';
-  if (/Brakelight/.test(n)) return 'brake';
-  if (/Headlight/.test(n)) return 'head';
-  return 'plain';
-}
-
-function prepMaterial(m: THREE.Material, role: Part['role']) {
-  const mm = m as THREE.MeshPhysicalMaterial;
-  if (role === 'paint' || role === 'rim') mm.color.set(0xffffff);
-  if (role === 'paint') { mm.clearcoat = 1; mm.clearcoatRoughness = 0.06; mm.roughness = 0.32; mm.metalness = 0.55; }
-  if (role === 'brake' || role === 'head') {
+// shared materials (one shader program per role for every car)
+const MATS: Record<Role, THREE.Material> = (() => {
+  const paint = new THREE.MeshPhysicalMaterial({ color: 0xffffff, clearcoat: 1, clearcoatRoughness: 0.06, roughness: 0.34, metalness: 0.5, envMapIntensity: 1.4 });
+  const glass = new THREE.MeshPhysicalMaterial({ color: 0x0f1418, roughness: 0.04, metalness: 0.1, transparent: true, opacity: 0.62, envMapIntensity: 1.6 });
+  const trim = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0.08 });
+  const chrome = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.18, metalness: 1, envMapIntensity: 1.3 });
+  const rim = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.3, metalness: 0.85, side: THREE.DoubleSide });
+  const tyre = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.88, metalness: 0, side: THREE.DoubleSide });
+  const light = (role: 'head' | 'brake') => {
+    const m = new THREE.MeshStandardMaterial({ color: role === 'brake' ? '#6a0d0d' : '#e8e8e2', roughness: 0.12, metalness: 0.1 });
     // per-instance light level: emissive scaled by instance colour
-    mm.emissive = new THREE.Color(role === 'brake' ? '#ff2a1a' : '#fff4e0');
-    mm.emissiveIntensity = role === 'brake' ? 6 : 10;
-    mm.onBeforeCompile = (sh) => {
+    m.emissive = new THREE.Color(role === 'brake' ? '#ff2a1a' : '#fff4e0');
+    m.emissiveIntensity = role === 'brake' ? 6 : 10;
+    m.onBeforeCompile = (sh) => {
       sh.fragmentShader = sh.fragmentShader.replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
         #ifdef USE_INSTANCING_COLOR
         totalEmissiveRadiance *= vColor.r;
         diffuseColor.rgb /= max(vColor, vec3(0.001));
         #endif`);
     };
-    mm.customProgramCacheKey = () => 'carlight_' + role;
+    m.customProgramCacheKey = () => 'carlight_' + role;
+    return m;
+  };
+  return { paint, glass, trim, chrome, rim, tyre, head: light('head'), brake: light('brake') };
+})();
+
+const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
+
+/** Plain float attributes (meshopt-quantized files store normalized integers). */
+function plainGeometry(g: THREE.BufferGeometry) {
+  const out = new THREE.BufferGeometry();
+  for (const name of ['position', 'normal', 'color'] as const) {
+    const a = g.getAttribute(name) as THREE.BufferAttribute | undefined;
+    if (!a) continue;
+    const size = name === 'color' ? 3 : a.itemSize;
+    const arr = new Float32Array(a.count * size);
+    for (let i = 0; i < a.count; i++) for (let k = 0; k < size; k++) arr[i * size + k] = a.getComponent(i, k);
+    out.setAttribute(name, new THREE.BufferAttribute(arr, size));
   }
-  mm.envMapIntensity = role === 'paint' ? 1.4 : 1;
-  return mm;
+  if (g.index) out.setIndex(new THREE.BufferAttribute(Uint32Array.from(g.index.array as ArrayLike<number>), 1));
+  return out;
 }
 
-async function loadTemplate(file: string): Promise<Template> {
-  const g = await new GLTFLoader().loadAsync((import.meta.env.BASE_URL ?? '/') + 'assets/cars/' + file);
+async function loadTemplate(id: CarModelId, file: string): Promise<Template> {
+  const g = await loader.loadAsync((import.meta.env.BASE_URL ?? '/') + 'assets/cars/' + file);
+  let info: any = null;
+  g.scene.traverse((o) => { if (o.userData?.car) info = o.userData.car; });
+  if (!info) throw new Error('car info missing in ' + file);
   g.scene.updateMatrixWorld(true);
-  const body = new Map<THREE.Material, THREE.BufferGeometry[]>();
-  const doorGeos: Record<'L' | 'R', Map<THREE.Material, THREE.BufferGeometry[]>> = { L: new Map(), R: new Map() };
-  const pivots: Record<'L' | 'R', THREE.Vector3> = { L: new THREE.Vector3(), R: new THREE.Vector3() };
-  g.scene.traverse((o) => { const m = /^BodyDoor(L|R)Color1$/.exec(o.name); if (m) o.getWorldPosition(pivots[m[1] as 'L' | 'R']); });
-  const wheelGeos: Record<WheelId, Map<THREE.Material, THREE.BufferGeometry[]>> = { FL: new Map(), FR: new Map(), RL: new Map(), RR: new Map() };
-  const wheelBox: Record<WheelId, THREE.Box3> = { FL: new THREE.Box3(), FR: new THREE.Box3(), RL: new THREE.Box3(), RR: new THREE.Box3() };
-  g.scene.traverse((o) => {
-    const mesh = o as THREE.Mesh;
-    if (!mesh.isMesh) return;
-    let p: THREE.Object3D | null = mesh, wid: WheelId | null = null, door: 'L' | 'R' | null = null;
-    while (p) {
-      const m = /^Wheel(Front|Rear)(L|R)/.exec(p.name); if (m) { wid = ((m[1] === 'Front' ? 'F' : 'R') + m[2]) as WheelId; break; }
-      const d = /^BodyDoor(L|R)Color1$/.exec(p.name); if (d) { door = d[1] as 'L' | 'R'; break; }
-      p = p.parent;
-    }
-    const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-    const geo = plain(mesh.geometry, mesh.matrixWorld);
-    const target = wid ? wheelGeos[wid] : door ? doorGeos[door] : body;
-    if (wid) { geo.computeBoundingBox(); wheelBox[wid].union(geo.boundingBox!); }
-    const m = mats[0];
-    if (!target.has(m)) target.set(m, []);
-    target.get(m)!.push(geo);
-  });
-  const merge = (map: Map<THREE.Material, THREE.BufferGeometry[]>, offset?: THREE.Vector3): Part[] => [...map.entries()].map(([m, geos]) => {
-    const merged = mergeGeometries(geos, false)!;
-    if (offset) merged.translate(-offset.x, -offset.y, -offset.z);
-    const role = roleOf(m);
-    return { geo: merged, mat: prepMaterial(m, role), role };
-  });
-  const size = new THREE.Box3().setFromObject(g.scene).getSize(new THREE.Vector3());
-  const wheels = {} as Template['wheels'];
-  for (const id of ['FL', 'FR', 'RL', 'RR'] as WheelId[]) {
-    const c = wheelBox[id].getCenter(new THREE.Vector3());
-    wheels[id] = { center: c, parts: merge(wheelGeos[id], c) };
+  const partsOf = (node: THREE.Object3D | undefined): Part[] => {
+    const out: Part[] = [];
+    if (!node) return out;
+    const inv = node.matrixWorld.clone().invert();
+    node.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh) return;
+      const r = /_([a-z]+)$/.exec(m.name)?.[1] as Role | undefined;
+      const role: Role = r && MATS[r] ? r : 'trim';
+      // dequantize, then bake the mesh's transform relative to its part node
+      const geo = plainGeometry(m.geometry);
+      geo.applyMatrix4(inv.clone().multiply(m.matrixWorld));
+      if (!geo.getAttribute('normal')) geo.computeVertexNormals();
+      out.push({ geo, mat: MATS[role], role });
+    });
+    return out;
+  };
+  const v = (a: number[]) => new THREE.Vector3(a[0], a[1], a[2]);
+  const doors: Template['doors'] = {};
+  for (const s of ['L', 'R'] as const) {
+    const n = g.scene.getObjectByName('door' + s);
+    if (n && info.doors?.[s]) doors[s] = { pivot: v(info.doors[s]), parts: partsOf(n) };
   }
-  return { body: merge(body), wheels, size, doors: { L: { pivot: pivots.L, parts: merge(doorGeos.L, pivots.L) }, R: { pivot: pivots.R, parts: merge(doorGeos.R, pivots.R) } } };
+  return {
+    id, body: partsOf(g.scene.getObjectByName('body')), doors, wheel: partsOf(g.scene.getObjectByName('wheel')),
+    wheels: { FL: v(info.wheels.FL), FR: v(info.wheels.FR), RL: v(info.wheels.RL), RR: v(info.wheels.RR) },
+    radius: info.radius, size: v(info.size),
+    // seat cushion → the controller's seat reference (hips sit ~0.5 m above it)
+    seat: v(info.seat).setY(info.seat[1] - 0.4), seatR: v(info.seatR).setY(info.seatR[1] - 0.4),
+  };
 }
 
-/** Near (28k tris) and far (7.5k tris) levels of detail. */
+/** Load every car model (near + far LOD). */
 export function loadCarModel(): Promise<boolean> {
   if (loading) return loading;
   loading = (async () => {
-    try {
-      [template, templateFar] = await Promise.all([loadTemplate('concept_lod.glb'), loadTemplate('concept_far.glb')]);
-      return true;
-    } catch (e) {
-      console.warn('[cars] glTF car failed, using procedural cars', e);
-      template = templateFar = null;
-      return false;
-    }
+    const results = await Promise.allSettled(CAR_MODELS.map(async (id) => {
+      const [n, f] = await Promise.all([loadTemplate(id, id + '.glb'), loadTemplate(id, id + '_far.glb')]);
+      near.set(id, n); far.set(id, f);
+    }));
+    const failed = results.filter((r) => r.status === 'rejected');
+    if (failed.length) console.warn('[cars] some car models failed', failed);
+    if (!near.size) { console.warn('[cars] glTF cars failed, using procedural cars'); return false; }
+    return true;
   })();
   return loading;
 }
 
-/** Proportions per catalogue body style (the base model is a low sports car). */
-const STYLE: Record<string, { s: [number, number, number]; lift: number; wheel: number }> = {
-  hatch: { s: [0.94, 1.12, 0.86], lift: 0.04, wheel: 0.92 },
-  sedan: { s: [0.97, 1.14, 1.04], lift: 0.05, wheel: 0.95 },
-  ev: { s: [0.98, 1.1, 1.02], lift: 0.04, wheel: 0.97 },
-  suv: { s: [1.02, 1.32, 1.06], lift: 0.16, wheel: 1.12 },
-  sports: { s: [1, 1.02, 1], lift: 0, wheel: 1 },
-  super: { s: [1.02, 0.96, 1.03], lift: -0.02, wheel: 1 },
-  luxury: { s: [1.0, 1.12, 1.12], lift: 0.04, wheel: 1.02 },
-};
+const tplFor = (id: CarModelId) => near.get(id) ?? near.get('sonata') ?? [...near.values()][0];
 
-const RIM: Record<string, string> = { gold: '#d4af37', black: '#2a2b2e', mesh: '#e6e9ee', sport: '#c2c6cc', steel: '#9ca2a8' };
+const RIM: Record<string, string> = { gold: '#d4af37', black: '#2a2b2e', mesh: '#e6e9ee', sport: '#c2c6cc', steel: '#ffffff' };
 
 export interface FleetCar {
   root: THREE.Group;
+  model: CarModelId;
   wheels: { holder: THREE.Group; spin: THREE.Group; front: boolean; id: WheelId }[];
   paint: THREE.Color; rim: THREE.Color;
   brake: THREE.MeshStandardMaterial; head: THREE.MeshStandardMaterial;
-  style: (typeof STYLE)[string];
   lastSeen: number;
   /** Half extents for on-foot collision (local X = width, Z = length). */
   half: { w: number; l: number };
-  body: string;
   /** Door opening 0 (shut) .. 1 (open) for the driver (L) and passenger (R) side. */
   door: { L: number; R: number };
 }
 
-export function carDims(body: string) {
-  const st = STYLE[body] ?? STYLE.sedan;
-  const t = template!;
-  const fl = t.wheels.FL.center, rl = t.wheels.RL.center;
+export function carDims(model: CarModelId) {
+  const t = tplFor(model);
   return {
-    L: t.size.z * st.s[2], W: 1.96 * st.s[0], wheelR: 0.38 * st.wheel * st.s[1] ** 0.3, wheelbase: (fl.z - rl.z) * st.s[2],
-    seat: new THREE.Vector3(0.38 * st.s[0], -0.1 * st.s[1] + st.lift * 1.5, -0.3 * st.s[2]),
+    L: t.size.z, W: t.size.x, wheelR: t.radius, wheelbase: t.wheels.FL.z - t.wheels.RL.z,
+    seat: t.seat.clone(), seatR: t.seatR.clone(), hasDoors: !!t.doors.L,
   };
 }
 
 /** Builds the transform hierarchy for one car and registers it with the fleet. */
-export function makeFleetCar(body: string, color: string, rims: string): FleetCar {
-  const t = template!;
-  const st = STYLE[body] ?? STYLE.sedan;
+export function makeFleetCar(model: CarModelId, color: string, rims: string): FleetCar {
+  const t = tplFor(model);
   const root = new THREE.Group();
   root.name = 'car';
   const wheels: FleetCar['wheels'] = [];
   for (const id of ['FL', 'FR', 'RL', 'RR'] as WheelId[]) {
-    const c = t.wheels[id].center;
     const holder = new THREE.Group();
-    holder.position.set(c.x * st.s[0], c.y * st.wheel + st.lift * 0, c.z * st.s[2]);
+    holder.position.copy(t.wheels[id]);
     const spin = new THREE.Group();
     holder.add(spin);
     root.add(holder);
     wheels.push({ holder, spin, front: id[0] === 'F', id });
   }
   const car: FleetCar = {
-    root, wheels, style: st,
+    root, wheels, model: t.id as CarModelId,
     paint: new THREE.Color(color), rim: new THREE.Color(RIM[rims] ?? RIM.steel),
     brake: new THREE.MeshStandardMaterial({ emissiveIntensity: 0.4 }), head: new THREE.MeshStandardMaterial({ emissiveIntensity: 0.4 }),
     lastSeen: performance.now(),
-    half: { w: carDims(body).W / 2, l: carDims(body).L / 2 },
-    body,
+    half: { w: t.size.x / 2 - 0.05, l: t.size.z / 2 },
     door: { L: 0, R: 0 },
   };
   fleet.add(car);
   return car;
 }
 
-/** Wheels in the source spin about their local X axis. */
-export const WHEEL_SPIN_AXIS = 'x' as const;
+interface Batch { im: THREE.InstancedMesh; part: Part; kind: 'body' | 'door' | 'wheel'; door?: 'L' | 'R'; n: number }
 
 class Fleet {
   group = new THREE.Group();
   cars: FleetCar[] = [];
-  private meshes: { im: THREE.InstancedMesh; part: Part; wheel: WheelId | null; lod: number; door?: 'L' | 'R' }[] = [];
+  /** Per model and LOD: instanced meshes for every part. */
+  private batches = new Map<string, Batch[]>();
   private cap = 0;
   private m = new THREE.Matrix4();
   private m2 = new THREE.Matrix4();
   private m3 = new THREE.Matrix4();
-  private m4 = new THREE.Matrix4();
   private p = new THREE.Vector3();
   private col = new THREE.Color();
+  private q = new THREE.Quaternion();
+  private e = new THREE.Euler();
   /** Cars closer than this use the detailed model. */
-  nearDist = 45;
+  nearDist = 40;
 
   add(c: FleetCar) {
     this.cars.push(c);
-    if (this.cars.length > this.cap) this.rebuild(Math.max(48, this.cap * 2));
+    if (this.cars.length > this.cap) this.rebuild(Math.max(32, this.cap * 2));
   }
 
   private rebuild(cap: number) {
-    for (const { im } of this.meshes) { im.removeFromParent(); im.dispose(); }
-    this.meshes = [];
+    for (const list of this.batches.values()) for (const { im } of list) { im.removeFromParent(); im.dispose(); }
+    this.batches.clear();
     this.cap = cap;
-    [template!, templateFar!].forEach((t, lod) => {
-      const mk = (part: Part, wheel: WheelId | null, door?: 'L' | 'R') => {
-        const im = new THREE.InstancedMesh(part.geo, part.mat, cap);
+    for (const [lod, map] of [[0, near], [1, far]] as const) for (const [id, t] of map) {
+      const list: Batch[] = [];
+      const mk = (part: Part, kind: Batch['kind'], door?: 'L' | 'R') => {
+        const n = kind === 'wheel' ? cap * 4 : cap;
+        const im = new THREE.InstancedMesh(part.geo, part.mat, n);
         im.frustumCulled = false;
-        im.castShadow = lod === 0;
+        im.castShadow = lod === 0 && part.role !== 'glass';
         im.receiveShadow = true;
         im.count = 0;
-        if (part.role !== 'plain') im.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(cap * 3).fill(1), 3);
+        im.visible = false;
+        if (['paint', 'rim', 'head', 'brake'].includes(part.role)) im.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(n * 3).fill(1), 3);
         this.group.add(im);
-        this.meshes.push({ im, part, wheel, lod, door });
+        list.push({ im, part, kind, door, n: 0 });
       };
-      for (const p of t.body) mk(p, null);
-      for (const d of ['L', 'R'] as const) for (const p of t.doors[d].parts) mk(p, null, d);
-      for (const id of ['FL', 'FR', 'RL', 'RR'] as WheelId[]) for (const p of t.wheels[id].parts) mk(p, id);
-    });
+      for (const p of t.body) mk(p, 'body');
+      for (const d of ['L', 'R'] as const) for (const p of t.doors[d]?.parts ?? []) mk(p, 'door', d);
+      for (const p of t.wheel) mk(p, 'wheel');
+      this.batches.set(id + ':' + lod, list);
+    }
   }
 
   /** Push a circle (at `pos`, radius r) out of every nearby car's oriented box, optionally ignoring one car. */
@@ -241,16 +245,15 @@ class Fleet {
       if (!c.root.parent || !c.root.visible || c.root === ignore) continue;
       const cp = c.root.getWorldPosition(this.p);
       const dx = pos.x - cp.x, dz = pos.z - cp.z;
-      if (dx * dx + dz * dz > 36) continue;
-      const yaw = c.root.getWorldQuaternion(this.q).y === 0 && this.q.w === 1 ? 0 : new THREE.Euler().setFromQuaternion(this.q, 'YXZ').y;
+      if (dx * dx + dz * dz > 40) continue;
+      const yaw = this.e.setFromQuaternion(c.root.getWorldQuaternion(this.q), 'YXZ').y;
       const cs = Math.cos(yaw), sn = Math.sin(yaw);
       // into car-local space (car forward = +Z)
       const lx = dx * cs - dz * sn, lz = dx * sn + dz * cs;
-      const hw = c.half.w * 0.92 + r, hl = c.half.l * 0.95 + r;
+      const hw = c.half.w * 0.95 + r, hl = c.half.l * 0.96 + r;
       if (Math.abs(lx) >= hw || Math.abs(lz) >= hl) continue;
       let px = 0, pz = 0;
       if (hw - Math.abs(lx) < hl - Math.abs(lz)) px = Math.sign(lx || 1) * (hw - Math.abs(lx)); else pz = Math.sign(lz || 1) * (hl - Math.abs(lz));
-      // back to world
       pos.x += px * cs + pz * sn;
       pos.z += -px * sn + pz * cs;
       moved = true;
@@ -269,8 +272,6 @@ class Fleet {
     return best;
   }
 
-  private q = new THREE.Quaternion();
-
   private visible(o: THREE.Object3D) {
     let p: THREE.Object3D | null = o;
     while (p) { if (!p.visible) return false; if ((p as THREE.Scene).isScene) return true; p = p.parent; }
@@ -280,45 +281,50 @@ class Fleet {
   update(cam?: THREE.Vector3, maxDist = 260) {
     if (!this.cap) return;
     const now = performance.now();
-    // forget cars that were removed from the scene a while ago
     this.cars = this.cars.filter((c) => { if (c.root.parent) c.lastSeen = now; return now - c.lastSeen < 4000; });
-    const wheelIdx: Record<WheelId, number> = { FL: 0, FR: 1, RL: 2, RR: 3 };
-    const n = [0, 0];
+    for (const list of this.batches.values()) for (const b of list) b.n = 0;
     for (const c of this.cars) {
       if (!this.visible(c.root)) continue;
       c.root.updateWorldMatrix(true, true);
       const d2 = cam ? cam.distanceToSquared(this.p.setFromMatrixPosition(c.root.matrixWorld)) : 0;
       if (d2 > maxDist * maxDist) continue;
       const lod = d2 < this.nearDist * this.nearDist ? 0 : 1;
-      const i = n[lod]++;
-      const tpl = lod === 0 ? template! : templateFar!;
-      for (const { im, part, wheel, lod: l, door } of this.meshes) {
-        if (l !== lod) continue;
-        if (door) {
-          const pv = tpl.doors[door].pivot;
-          const ang = (door === 'L' ? -1.05 : 1.05) * c.door[door];
-          this.m.copy(c.root.matrixWorld).multiply(this.m2.makeScale(c.style.s[0], c.style.s[1], c.style.s[2]).setPosition(0, c.style.lift, 0))
-            .multiply(this.m3.makeTranslation(pv.x, pv.y, pv.z)).multiply(this.m4.makeRotationY(ang));
-        } else if (wheel) {
-          // vehicle code spins wheels via spin.rotation.z (procedural convention); our axles run along X
-          const w = c.wheels[wheelIdx[wheel]];
-          this.m.copy(w.holder.matrixWorld).multiply(this.m2.makeRotationX(-w.spin.rotation.z)).multiply(this.m3.makeScale(c.style.wheel, c.style.wheel, c.style.wheel));
-        } else {
-          this.m.copy(c.root.matrixWorld).multiply(this.m2.makeScale(c.style.s[0], c.style.s[1], c.style.s[2]).setPosition(0, c.style.lift, 0));
+      const list = this.batches.get(c.model + ':' + lod);
+      if (!list) continue;
+      const t = (lod === 0 ? near : far).get(c.model)!;
+      for (const b of list) {
+        const { im, part } = b;
+        if (b.kind === 'wheel') {
+          for (const w of c.wheels) {
+            // right-side wheels are the same wheel turned around; their spin flips with it
+            const right = w.id[1] === 'R';
+            this.m.copy(w.holder.matrixWorld);
+            if (right) this.m.multiply(this.m2.makeRotationY(Math.PI));
+            this.m.multiply(this.m3.makeRotationX(right ? w.spin.rotation.z : -w.spin.rotation.z));
+            im.setMatrixAt(b.n, this.m);
+            if (im.instanceColor) im.setColorAt(b.n, c.rim);
+            b.n++;
+          }
+          continue;
         }
-        im.setMatrixAt(i, this.m);
+        if (b.kind === 'door') {
+          const pv = t.doors[b.door!]!.pivot;
+          const ang = (b.door === 'L' ? -1.05 : 1.05) * c.door[b.door!];
+          this.m.copy(c.root.matrixWorld).multiply(this.m2.makeTranslation(pv.x, pv.y, pv.z)).multiply(this.m3.makeRotationY(ang));
+        } else this.m.copy(c.root.matrixWorld);
+        im.setMatrixAt(b.n, this.m);
         if (im.instanceColor) {
-          if (part.role === 'paint') im.setColorAt(i, c.paint);
-          else if (part.role === 'rim') im.setColorAt(i, c.rim);
-          else if (part.role === 'brake') im.setColorAt(i, this.col.setScalar(Math.min(1, c.brake.emissiveIntensity / 3)));
-          else if (part.role === 'head') im.setColorAt(i, this.col.setScalar(Math.min(1, c.head.emissiveIntensity / 3)));
+          if (part.role === 'paint') im.setColorAt(b.n, c.paint);
+          else if (part.role === 'brake') im.setColorAt(b.n, this.col.setScalar(Math.min(1, c.brake.emissiveIntensity / 3)));
+          else if (part.role === 'head') im.setColorAt(b.n, this.col.setScalar(Math.min(1, c.head.emissiveIntensity / 3)));
         }
+        b.n++;
       }
     }
-    for (const { im, lod } of this.meshes) {
-      im.count = n[lod];
-      im.instanceMatrix.needsUpdate = true;
-      if (im.instanceColor) im.instanceColor.needsUpdate = true;
+    for (const list of this.batches.values()) for (const b of list) {
+      b.im.count = b.n;
+      b.im.visible = b.n > 0;
+      if (b.n) { b.im.instanceMatrix.needsUpdate = true; if (b.im.instanceColor) b.im.instanceColor.needsUpdate = true; }
     }
   }
 }
